@@ -1,0 +1,104 @@
+
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini
+
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+*.sublime-project
+*.sublime-workspace
+
+# ==============================
+# Environment & Secrets
+# ==============================
+.env
+.env.local
+.env.*.local
+*.env
+*.pem
+*.key
+*.cert
+
+# ==============================
+# Python / FastAPI Backend
+# ==============================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+.venv/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+.pytest_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+node_modules/
+node_modules
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+dist/
+dist-ssr/
+.vite/
+.next/
+out/
+coverage/
+.cache/
+.parcel-cache/
+*.tsbuildinfo
+*.local
+.pnp
+.pnp.js
+
+# ==============================
+# Frontend / app build leftovers
+# ==============================
+*.orig
+*.rej
+*.tmp
+
+firmware/.pio/
+firmware/.vscode/.browse.c_cpp.db*
+firmware/.vscode/c_cpp_properties.json
+firmware/.vscode/launch.json
+firmware/.vscode/ipch/
+firmware/*.hex
+firmware/*.bin
+firmware/*.elf
+
+
+*.log
+*.sqlite
+*.sqlite3
+*.db
