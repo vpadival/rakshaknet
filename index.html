@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>RakshakNet — Aegis-Grid</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mark">◆</span>
+      <div class="brand-text">
+        <h1>RakshakNet <span class="brand-sub">/ Aegis-Grid</span></h1>
+        <p>SIH26178 — environmental hazard monitoring network</p>
+      </div>
+    </div>
+
+    <div class="view-toggle" role="tablist" aria-label="Dashboard view">
+      <button class="toggle-btn active" data-view="authority" role="tab" aria-selected="true">Authority</button>
+      <button class="toggle-btn" data-view="citizen" role="tab" aria-selected="false">Citizen</button>
+    </div>
+
+    <div class="topbar-status">
+      <span class="dot dot-live"></span>
+      <span id="clock">--:--:--</span>
+    </div>
+  </header>
+
+  <main class="layout">
+
+    <!-- Zone list -->
+    <aside class="zone-list" id="zoneList">
+      <div class="zone-list-head">
+        <h2>Monitored zones</h2>
+        <button id="simulateBtn" class="ghost-btn" title="Simulate an escalating event for the demo">Simulate escalation</button>
+      </div>
+      <div id="zoneItems"></div>
+    </aside>
+
+    <!-- Map -->
+    <section class="map-wrap">
+      <div id="map"></div>
+      <div class="legend">
+        <span><i class="swatch swatch-safe"></i>Safe</span>
+        <span><i class="swatch swatch-moderate"></i>Moderate</span>
+        <span><i class="swatch swatch-severe"></i>Severe</span>
+      </div>
+    </section>
+
+    <!-- Detail panel -->
+    <aside class="detail-panel" id="detailPanel">
+      <!-- filled by app.js -->
+    </aside>
+
+  </main>
+
+  <footer class="sms-log" id="smsLog">
+    <div class="sms-log-head">
+      <h2>SMS alert log</h2>
+      <span class="sms-log-note">Templated, zone-targeted dispatch on severity threshold</span>
+    </div>
+    <div id="smsEntries" class="sms-entries"></div>
+  </footer>
+
+  <div id="toast" class="toast"></div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="data.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
