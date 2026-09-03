@@ -1,0 +1,50 @@
+{
+  "hazard": "fire",
+  "features": [
+    "min_rh",
+    "mean_rh",
+    "max_temp",
+    "total_precip",
+    "max_wind"
+  ],
+  "feature_description": {
+    "min_rh": "Minimum relative humidity that day (%)",
+    "mean_rh": "Mean relative humidity that day (%)",
+    "max_temp": "Maximum air temperature that day (deg C)",
+    "total_precip": "Total precipitation that day (mm)",
+    "max_wind": "Maximum wind gust that day (km/hr)"
+  },
+  "mean": [
+    64.40972644376905,
+    89.63846379697554,
+    31.59513677811549,
+    9.47446808510638,
+    2.13677811550152
+  ],
+  "scale": [
+    17.714230097565142,
+    5.9668575179148045,
+    3.504904171124933,
+    28.86157432887863,
+    3.5945099072841145
+  ],
+  "weights": [
+    -1.0749386368086467,
+    -1.3486295568346998,
+    -0.34617633818035093,
+    -0.9712369008471365,
+    -0.19055192994991788
+  ],
+  "bias": -1.0759842501196206,
+  "cv_auc_mean": 0.9023,
+  "cv_auc_folds": [
+    0.806,
+    0.9815,
+    0.9897,
+    1.0,
+    0.7343
+  ],
+  "n_samples": 439,
+  "trained_on": "Daily-aggregated Sirsi (Western Ghats) weather (forest.xlsx) labeled against nearby MODIS fire-hotspot detections (forest2.xlsx), Feb 2021-Apr 2022.",
+  "caveats": "Single location, ~14 months. Retrain per-region before deploying broadly."
+}
