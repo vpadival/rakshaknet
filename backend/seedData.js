@@ -38,12 +38,12 @@ const seedZones = [
   },
   {
     id: "z4",
-    name: "RakshakNet Hardware Demo Node",
+    name: "RakshakNet Hardware Node",
     hazard: "flood",
     lat: 12.935, lng: 77.614,
     sensors: {},
-    peopleDetected: { count: 0, note: "Awaiting camera telemetry" },
-    safeZone: { name: "Demo safe area", lat: 12.936, lng: 77.615, distanceKm: 0.2 },
+    peopleDetected: { count: 0, note: "Awaiting camera analysis" },
+    safeZone: { name: "Emergency Assembly Point", lat: 12.936, lng: 77.615, distanceKm: 0.2 },
   },
   {
     id: "z5",

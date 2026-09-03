@@ -160,17 +160,15 @@ app.post(
       cameraFireConfirmed,
     } = req.body || {};
 
-    if (
-      !nodeId ||
-      typeof nodeId !== "string"
-    ) {
+    if (typeof nodeId !== "string" || !nodeId.trim()) {
       return res.status(400).json({
         error: "nodeId is required",
       });
     }
 
-    const receivedTimestamp =
-      typeof timestamp === "number"
+    const timestampMs =
+      typeof timestamp === "number" &&
+      Number.isFinite(timestamp)
         ? timestamp
         : Date.now();
 
@@ -179,7 +177,7 @@ app.post(
     const rangeWarnings = [];
     const validSensors = {};
 
-    if (sensors) {
+    if (sensors && typeof sensors === "object") {
       for (
         const [key, value]
         of Object.entries(sensors)
@@ -216,7 +214,7 @@ app.post(
       };
     }
 
-    if (peopleDetected) {
+    if (peopleDetected && typeof peopleDetected === "object") {
       zone.peopleDetected = {
         ...zone.peopleDetected,
         ...peopleDetected,
@@ -225,10 +223,7 @@ app.post(
 
     zone.nodeStatus = {
       nodeId,
-      lastSeen:
-        new Date(
-          receivedTimestamp
-        ).toISOString(),
+      lastSeen: new Date().toISOString(),
       online: true,
     };
 
@@ -244,6 +239,8 @@ app.post(
         // enter rolling aggregators.
         freshSensors:
           validSensors,
+
+        timestampMs,
       }
     );
 
@@ -305,7 +302,7 @@ app.post(
 app.post(
   "/api/zones/:id/camera/frame",
   express.raw({
-    type: "image/jpeg",
+    type: ["image/jpeg", "image/jpg"],
     limit: "2mb",
   }),
   (req, res) => {
@@ -315,8 +312,8 @@ app.post(
       return res.status(404).json({ error: "Zone not found" });
     }
 
-    if (!req.body || req.body.length === 0) {
-      return res.status(400).json({ error: "JPEG body is empty" });
+    if (!Buffer.isBuffer(req.body) || req.body.length === 0) {
+      return res.status(400).json({ error: "JPEG frame is required" });
     }
 
     const cameraId = req.header("X-Camera-ID") || "ESP32-CAM";
@@ -342,6 +339,7 @@ app.get("/api/zones/:id/camera/latest.jpg", (req, res) => {
   res.set({
     "Content-Type": "image/jpeg",
     "Cache-Control": "no-store, no-cache, must-revalidate",
+    Pragma: "no-cache",
   });
   res.send(frame);
 });
@@ -423,7 +421,7 @@ app.get(/^(?!\/api\/).*/, (req, res) => {
 });
 
 app.listen(PORT, "0.0.0.0", () => {
-  console.log(`RakshakNet server running on port ${PORT}`);
+  console.log(`RakshakNet listening on port ${PORT}`);
   console.log(`  Dashboard: http://localhost:${PORT}`);
   console.log(`  API:       http://localhost:${PORT}/api/zones`);
 });

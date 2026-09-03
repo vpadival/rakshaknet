@@ -8,13 +8,13 @@ const SENSOR_LIMITS = {
     plausibleMin: 0,
     plausibleMax: 10,
 
-    // Real deployment vs tabletop prototype
-    moderateAt: DEMO_MODE ? 0.10 : 3,
-    severeAt: DEMO_MODE ? 0.18 : 6,
+    // Tabletop prototype vs actual deployment.
+    moderateAt: DEMO_MODE ? 0.10 : 3.0,
+    severeAt: DEMO_MODE ? 0.18 : 6.0,
 
     source: DEMO_MODE
-      ? "tabletop prototype thresholds"
-      : "real-world deployment thresholds",
+      ? "RakshakNet tabletop prototype calibration"
+      : "deployment threshold - recalibrate per installation",
   },
 
   rainfallMmHr: {
@@ -23,17 +23,17 @@ const SENSOR_LIMITS = {
     plausibleMax: 300,
     moderateAt: 15,
     severeAt: 40,
-    source: "quantitative rain-gauge input only",
+    source: "quantitative rainfall gauge only",
   },
 
-  // Your present rain plate should use this instead of pretending to be mm/hr
+  // Current rain plate gives relative wetness, not actual rainfall in mm/hr.
   rainIntensityPct: {
     unit: "%",
     plausibleMin: 0,
     plausibleMax: 100,
     moderateAt: 40,
     severeAt: 80,
-    source: "prototype rain/wetness sensor — relative intensity only",
+    source: "prototype rain/wetness plate",
   },
 
   soilMoisturePct: {
@@ -42,14 +42,13 @@ const SENSOR_LIMITS = {
     plausibleMax: 100,
     moderateAt: 70,
     severeAt: 90,
-    source: "calibrated soil-moisture sensor",
+    source: "calibrated soil sensor",
   },
 
   humidityPct: {
     unit: "%",
     plausibleMin: 0,
     plausibleMax: 100,
-    lowFireRiskAt: 30,
     source: "DHT22",
   },
 
@@ -62,17 +61,17 @@ const SENSOR_LIMITS = {
     source: "DHT22",
   },
 
-  // Keep this only if you later calibrate MQ-2 properly to ppm.
+  // Keep calibrated ppm support for the future.
   mq2Ppm: {
     unit: "ppm",
     plausibleMin: 0,
     plausibleMax: 10000,
     moderateAt: 200,
     severeAt: 400,
-    source: "requires MQ-2 Rs/R0 calibration",
+    source: "requires proper MQ-2 Rs/R0 calibration",
   },
 
-  // Current hardware-friendly representation.
+  // Current prototype can safely transmit ADC.
   mq2Raw: {
     unit: "ADC",
     plausibleMin: 0,
@@ -80,15 +79,14 @@ const SENSOR_LIMITS = {
     source: "ESP32 ADC reading",
   },
 
-  // Better than a fixed raw threshold:
-  // current ADC / clean-air baseline.
+  // Current reading divided by clean-air baseline.
   mq2Ratio: {
     unit: "x baseline",
     plausibleMin: 0,
     plausibleMax: 20,
     moderateAt: 1.5,
     severeAt: 2.0,
-    source: "prototype baseline-relative smoke indication",
+    source: "prototype MQ-2 baseline-relative reading",
   },
 
   aqi: {
@@ -97,16 +95,19 @@ const SENSOR_LIMITS = {
     plausibleMax: 500,
     moderateAt: 101,
     severeAt: 301,
-    source: "CPCB National AQI scale",
+    source: "CPCB National AQI",
   },
 };
 
 function checkSensorRange(key, value) {
-  const limit = SENSOR_LIMITS[key];
+  const limits = SENSOR_LIMITS[key];
 
-  // Objects such as pollutants are validated elsewhere.
-  if (!limit) {
-    return { inRange: true, note: null };
+  // Some compound values such as pollutants are validated separately.
+  if (!limits) {
+    return {
+      inRange: true,
+      note: null,
+    };
   }
 
   if (
@@ -119,27 +120,28 @@ function checkSensorRange(key, value) {
     };
   }
 
-  if (
-    limit.plausibleMin !== undefined &&
-    value < limit.plausibleMin
-  ) {
+  if (limits.plausibleMin !== undefined && value < limits.plausibleMin) {
     return {
       inRange: false,
-      note: `${key}=${value} below plausible minimum (${limit.plausibleMin}${limit.unit})`,
+      note:
+        `${key}=${value} is below plausible minimum ` +
+        `${limits.plausibleMin} ${limits.unit}`,
     };
   }
 
-  if (
-    limit.plausibleMax !== undefined &&
-    value > limit.plausibleMax
-  ) {
+  if (limits.plausibleMax !== undefined && value > limits.plausibleMax) {
     return {
       inRange: false,
-      note: `${key}=${value} above plausible maximum (${limit.plausibleMax}${limit.unit})`,
+      note:
+        `${key}=${value} exceeds plausible maximum ` +
+        `${limits.plausibleMax} ${limits.unit}`,
     };
   }
 
-  return { inRange: true, note: null };
+  return {
+    inRange: true,
+    note: null,
+  };
 }
 
 module.exports = {

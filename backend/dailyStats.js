@@ -31,7 +31,7 @@ function indiaDateKey(timestampMs = Date.now()) {
 
 function updateDailyStats(
   zoneId,
-  sensors,
+  freshSensors,
   timestampMs = Date.now()
 ) {
   const today = indiaDateKey(timestampMs);
@@ -55,22 +55,20 @@ function updateDailyStats(
     };
   }
 
-  if (
-    typeof sensors.humidityPct === "number"
-  ) {
+  if (typeof freshSensors.humidityPct === "number") {
     stats.minRh = Math.min(
       stats.minRh,
-      sensors.humidityPct
+      freshSensors.humidityPct
     );
 
-    stats.sumRh += sensors.humidityPct;
+    stats.sumRh += freshSensors.humidityPct;
     stats.countRh += 1;
   }
 
-  if (typeof sensors.tempC === "number") {
+  if (typeof freshSensors.tempC === "number") {
     stats.maxTemp = Math.max(
       stats.maxTemp,
-      sensors.tempC
+      freshSensors.tempC
     );
   }
 
@@ -86,7 +84,7 @@ function updateDailyStats(
    * it will never enter this calculation.
    */
   if (
-    typeof sensors.rainfallMmHr === "number"
+    typeof freshSensors.rainfallMmHr === "number"
   ) {
     if (
       stats.lastRainTimestampMs !== null &&
@@ -110,15 +108,15 @@ function updateDailyStats(
 
     stats.lastRainTimestampMs = timestampMs;
     stats.lastRainRateMmHr =
-      sensors.rainfallMmHr;
+      freshSensors.rainfallMmHr;
   }
 
   if (
-    typeof sensors.windGustKmh === "number"
+    typeof freshSensors.windGustKmh === "number"
   ) {
     stats.maxWind = Math.max(
       stats.maxWind,
-      sensors.windGustKmh
+      freshSensors.windGustKmh
     );
   }
 

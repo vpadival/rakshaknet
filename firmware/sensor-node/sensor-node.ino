@@ -1,4 +1,5 @@
 #include <WiFi.h>
+#include <WiFiClientSecure.h>
 #include <HTTPClient.h>
 #include "DHT.h"
 
@@ -12,7 +13,7 @@
 
 const char* WIFI_SSID = "YOUR_WIFI_NAME";
 const char* WIFI_PASSWORD = "YOUR_WIFI_PASSWORD";
-const char* TELEMETRY_URL = "https://YOUR-DEPLOYED-BACKEND/api/zones/z4/telemetry";
+const char* TELEMETRY_URL = "https://rakshaknet.onrender.com/api/zones/z4/telemetry";
 const char* NODE_ID = "RN-SENSOR-01";
 
 const int SOIL_DRY_RAW = 3200;
@@ -87,8 +88,10 @@ void sendTelemetry() {
   json += "}}";
 
   if (WiFi.status() != WL_CONNECTED) connectWiFi();
+  WiFiClientSecure client;
+  client.setInsecure();
   HTTPClient http;
-  http.begin(TELEMETRY_URL);
+  http.begin(client, TELEMETRY_URL);
   http.addHeader("Content-Type", "application/json");
   Serial.println(http.POST(json));
   http.end();

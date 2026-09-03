@@ -1,10 +1,11 @@
 #include "esp_camera.h"
 #include <WiFi.h>
+#include <WiFiClientSecure.h>
 #include <HTTPClient.h>
 
 const char* WIFI_SSID = "YOUR_WIFI_NAME";
 const char* WIFI_PASSWORD = "YOUR_WIFI_PASSWORD";
-const char* FRAME_URL = "https://YOUR-DEPLOYED-BACKEND/api/zones/z4/camera/frame";
+const char* FRAME_URL = "https://rakshaknet.onrender.com/api/zones/z4/camera/frame";
 const char* CAMERA_ID = "RN-CAM-01";
 
 // AI Thinker ESP32-CAM pin map.
@@ -67,8 +68,10 @@ void uploadFrame() {
   camera_fb_t* frame = esp_camera_fb_get();
   if (!frame) return;
 
+  WiFiClientSecure client;
+  client.setInsecure();
   HTTPClient http;
-  http.begin(FRAME_URL);
+  http.begin(client, FRAME_URL);
   http.addHeader("Content-Type", "image/jpeg");
   http.addHeader("X-Camera-ID", CAMERA_ID);
   Serial.println(http.POST(frame->buf, frame->len));
