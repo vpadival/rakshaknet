@@ -1,0 +1,15 @@
+{
+  "name": "rakshaknet-backend",
+  "version": "0.1.0",
+  "description": "Aggregation server for RakshakNet / Aegis-Grid (SIH26178) — receives edge telemetry, applies severity rules, and exposes zone status + SMS dispatch for the dashboards.",
+  "main": "server.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.19.2"
+  }
+}

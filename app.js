@@ -1,13 +1,14 @@
 (function () {
   let currentView = "authority";
-  let selectedZoneId = ZONES[0].id;
+  let selectedZoneId = null;
+  let ZONES = [];
   const markers = {};
+  const POLL_MS = 5000;
 
   // ---------- Map setup ----------
   const map = L.map("map", { zoomControl: true }).setView([21.5, 82.5], 5);
   L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
     attribution: "&copy; OpenStreetMap contributors",
-    className: "dark-tiles",
   }).addTo(map);
 
   function markerIcon(level) {
@@ -18,11 +19,56 @@
     });
   }
 
-  ZONES.forEach((zone) => {
-    const marker = L.marker([zone.lat, zone.lng], { icon: markerIcon(zone.level) }).addTo(map);
-    marker.on("click", () => selectZone(zone.id));
-    markers[zone.id] = marker;
-  });
+  // ---------- API layer ----------
+  async function apiGet(path) {
+    const res = await fetch(`${API_BASE}${path}`);
+    if (!res.ok) throw new Error(`GET ${path} failed: ${res.status}`);
+    return res.json();
+  }
+  async function apiPost(path, body) {
+    const res = await fetch(`${API_BASE}${path}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body || {}),
+    });
+    if (!res.ok) throw new Error(`POST ${path} failed: ${res.status}`);
+    return res.json();
+  }
+
+  function setConnectionStatus(connected) {
+    const dot = document.querySelector(".dot-live");
+    dot.style.background = connected ? "var(--safe)" : "var(--severe)";
+    dot.title = connected ? "Connected to aggregation server" : "Backend unreachable — is the server running on :4000?";
+  }
+
+  async function loadZones({ isFirstLoad = false } = {}) {
+    try {
+      const data = await apiGet("/api/zones");
+      ZONES = data;
+      setConnectionStatus(true);
+
+      if (isFirstLoad) {
+        ZONES.forEach((zone) => {
+          const marker = L.marker([zone.lat, zone.lng], { icon: markerIcon(zone.level) }).addTo(map);
+          marker.on("click", () => selectZone(zone.id));
+          markers[zone.id] = marker;
+        });
+        selectedZoneId = ZONES[0] && ZONES[0].id;
+      } else {
+        ZONES.forEach((zone) => markers[zone.id] && markers[zone.id].setIcon(markerIcon(zone.level)));
+      }
+
+      renderZoneList();
+      renderDetail();
+    } catch (err) {
+      console.error(err);
+      setConnectionStatus(false);
+      if (isFirstLoad) {
+        document.getElementById("zoneItems").innerHTML =
+          `<p style="color:var(--text-muted);font-size:12px;">Can't reach the backend at ${API_BASE}. Start it with <code>npm start</code> in /backend, then reload.</p>`;
+      }
+    }
+  }
 
   // ---------- Zone list ----------
   function renderZoneList() {
@@ -46,7 +92,7 @@
   function selectZone(id) {
     selectedZoneId = id;
     const zone = ZONES.find((z) => z.id === id);
-    map.flyTo([zone.lat, zone.lng], 8, { duration: 0.6 });
+    if (zone) map.flyTo([zone.lat, zone.lng], 8, { duration: 0.6 });
     renderZoneList();
     renderDetail();
   }
@@ -78,7 +124,7 @@
 
     return `
       <div class="detail-head"><h2>${zone.name}</h2><span class="badge badge-${zone.level}">${zone.level}</span></div>
-      <p class="detail-hazard">${HAZARD_LABEL[zone.hazard]} hazard</p>
+      <p class="detail-hazard">${HAZARD_LABEL[zone.hazard]} hazard · updated ${new Date(zone.updatedAt).toLocaleTimeString()}</p>
 
       <div class="detail-section">
         <h3>Live sensor readings</h3>
@@ -147,15 +193,25 @@
     return "";
   }
 
-  // ---------- SMS log ----------
-  function logSms(zone) {
-    const container = document.getElementById("smsEntries");
-    const entry = document.createElement("div");
-    entry.className = "sms-entry";
-    const time = new Date().toLocaleTimeString();
-    entry.innerHTML = `<span class="sms-time">${time}</span><span class="sms-zone">${zone.name}</span><span>"${zone.citizenMessage}"</span>`;
-    container.prepend(entry);
-    showToast(`SMS alert dispatched — ${zone.name}`);
+  // ---------- SMS log (rendered from backend, refreshed alongside zones) ----------
+  async function refreshSmsLog() {
+    try {
+      const log = await apiGet("/api/sms-log");
+      const container = document.getElementById("smsEntries");
+      container.innerHTML = log
+        .slice(0, 20)
+        .map(
+          (entry) => `
+            <div class="sms-entry">
+              <span class="sms-time">${new Date(entry.timestamp).toLocaleTimeString()}</span>
+              <span class="sms-zone">${entry.zoneName}</span>
+              <span>"${entry.message}"</span>
+            </div>`
+        )
+        .join("");
+    } catch (err) {
+      // backend unreachable — leave whatever was last rendered
+    }
   }
 
   function showToast(message) {
@@ -180,23 +236,40 @@
     });
   });
 
-  // ---------- Escalation simulation (demo aid) ----------
-  document.getElementById("simulateBtn").addEventListener("click", () => {
+  // ---------- Escalation simulation (demo aid — posts real telemetry to the backend) ----------
+  document.getElementById("simulateBtn").addEventListener("click", async () => {
     const zone = ZONES.find((z) => z.level !== "severe") || ZONES[0];
-    zone.level = "severe";
-    if (zone.sensors.waterLevelM !== undefined) zone.sensors.waterLevelM = (zone.sensors.waterLevelM + 2.5).toFixed(1) * 1;
-    zone.confidence = Math.min(0.97, zone.confidence + 0.15);
-    markers[zone.id].setIcon(markerIcon(zone.level));
-    renderZoneList();
-    if (zone.id === selectedZoneId) renderDetail();
-    logSms(zone);
+    if (!zone) return;
+
+    const bump = {};
+    if (zone.sensors.waterLevelM !== undefined) bump.waterLevelM = zone.sensors.waterLevelM + 2.5;
+    if (zone.sensors.rainfallMmHr !== undefined) bump.rainfallMmHr = zone.sensors.rainfallMmHr + 20;
+    if (zone.sensors.mq2Ppm !== undefined) bump.mq2Ppm = zone.sensors.mq2Ppm + 150;
+    if (zone.sensors.aqi !== undefined) bump.aqi = zone.sensors.aqi + 100;
+
+    try {
+      const { smsSent } = await apiPost(`/api/zones/${zone.id}/telemetry`, { sensors: bump });
+      await loadZones();
+      await refreshSmsLog();
+      showToast(smsSent ? `SMS auto-dispatched — ${zone.name}` : `${zone.name} escalated`);
+      if (zone.id === selectedZoneId) renderDetail();
+    } catch (err) {
+      showToast("Backend unreachable — start the server on :4000");
+    }
   });
 
   // Delegate the authority "send SMS" button (re-rendered each time)
-  document.getElementById("detailPanel").addEventListener("click", (e) => {
+  document.getElementById("detailPanel").addEventListener("click", async (e) => {
     if (e.target && e.target.id === "dispatchSmsBtn") {
       const zone = ZONES.find((z) => z.id === selectedZoneId);
-      logSms(zone);
+      if (!zone) return;
+      try {
+        await apiPost(`/api/zones/${zone.id}/sms`, { message: zone.citizenMessage });
+        await refreshSmsLog();
+        showToast(`SMS alert dispatched — ${zone.name}`);
+      } catch (err) {
+        showToast("Backend unreachable — start the server on :4000");
+      }
     }
   });
 
@@ -208,6 +281,8 @@
   setInterval(tickClock, 1000);
 
   // ---------- Init ----------
-  renderZoneList();
-  renderDetail();
+  loadZones({ isFirstLoad: true });
+  refreshSmsLog();
+  setInterval(() => loadZones(), POLL_MS);
+  setInterval(refreshSmsLog, POLL_MS);
 })();
