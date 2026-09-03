@@ -38,12 +38,12 @@ const seedZones = [
   },
   {
     id: "z4",
-    name: "Koramangala Drain — Zone 1",
+    name: "RakshakNet Hardware Demo Node",
     hazard: "flood",
     lat: 12.935, lng: 77.614,
-    sensors: { waterLevelM: 1.2, rainfallMmHr: 4, soilMoisturePct: 38, tempC: 24, humidityPct: 60 },
-    peopleDetected: { count: 0, note: "No persons detected" },
-    safeZone: { name: "N/A — zone currently safe", lat: 12.935, lng: 77.614, distanceKm: 0 },
+    sensors: {},
+    peopleDetected: { count: 0, note: "Awaiting camera telemetry" },
+    safeZone: { name: "Demo safe area", lat: 12.936, lng: 77.615, distanceKm: 0.2 },
   },
   {
     id: "z5",

@@ -40,27 +40,87 @@ function levelFromProbability(p) {
 // Revisit with a real historical flood dataset if one becomes available.
 // ---------------------------------------------------------------------------
 function classifyFlood(sensors) {
-  const { waterLevelM = 0, rainfallMmHr = 0, soilMoisturePct = 0 } = sensors;
-  const { severeAt: waterSevere, moderateAt: waterModerate } = SENSOR_LIMITS.waterLevelM;
-  const { severeAt: rainSevere, moderateAt: rainModerate } = SENSOR_LIMITS.rainfallMmHr;
+  const {
+    waterLevelM = 0,
+    rainfallMmHr,
+    rainIntensityPct,
+    soilMoisturePct = 0,
+  } = sensors;
 
-  if (waterLevelM >= waterSevere || rainfallMmHr >= rainSevere) {
+  const waterLimits =
+    SENSOR_LIMITS.waterLevelM;
+
+  const rainGaugeSevere =
+    typeof rainfallMmHr === "number" &&
+    rainfallMmHr >=
+      SENSOR_LIMITS.rainfallMmHr.severeAt;
+
+  const rainGaugeModerate =
+    typeof rainfallMmHr === "number" &&
+    rainfallMmHr >=
+      SENSOR_LIMITS.rainfallMmHr.moderateAt;
+
+  const rainPlateSevere =
+    typeof rainIntensityPct === "number" &&
+    rainIntensityPct >=
+      SENSOR_LIMITS.rainIntensityPct.severeAt;
+
+  const rainPlateModerate =
+    typeof rainIntensityPct === "number" &&
+    rainIntensityPct >=
+      SENSOR_LIMITS.rainIntensityPct.moderateAt;
+
+  const soilSevere =
+    soilMoisturePct >=
+    SENSOR_LIMITS.soilMoisturePct.severeAt;
+
+  const soilModerate =
+    soilMoisturePct >=
+    SENSOR_LIMITS.soilMoisturePct.moderateAt;
+
+  if (
+    waterLevelM >= waterLimits.severeAt ||
+    rainGaugeSevere ||
+    (
+      waterLevelM >= waterLimits.moderateAt &&
+      (rainPlateSevere || soilSevere)
+    )
+  ) {
     return {
       level: "severe",
-      cause: "Rapid water-level rise combined with heavy rainfall matches a flash-flood signature",
-      confidence: 0.85,
-      modelType: "rule-based",
+      cause:
+        "Multiple flood indicators show critical water rise, rainfall/wetness, or saturated soil",
+      confidence: 0.9,
+      modelType:
+        "multi-sensor rule fusion",
     };
   }
-  if (waterLevelM >= waterModerate || rainfallMmHr >= rainModerate || soilMoisturePct >= SENSOR_LIMITS.soilMoisturePct.moderateAt) {
+
+  if (
+    waterLevelM >=
+      waterLimits.moderateAt ||
+    rainGaugeModerate ||
+    rainPlateModerate ||
+    soilModerate
+  ) {
     return {
       level: "moderate",
-      cause: "Water level and soil saturation trending upward; monitor for escalation",
-      confidence: 0.6,
-      modelType: "rule-based",
+      cause:
+        "Flood indicators are elevated; continued monitoring is required",
+      confidence: 0.7,
+      modelType:
+        "multi-sensor rule fusion",
     };
   }
-  return { level: "safe", cause: "Readings within normal seasonal range", confidence: 0.9, modelType: "rule-based" };
+
+  return {
+    level: "safe",
+    cause:
+      "Flood-monitoring sensors are within normal range",
+    confidence: 0.9,
+    modelType:
+      "multi-sensor rule fusion",
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -71,51 +131,163 @@ function classifyFlood(sensors) {
 // it immediately, since direct detection is stronger evidence than a
 // weather-based danger estimate.
 // ---------------------------------------------------------------------------
-function classifyFire(sensors, zoneId, cameraFireConfirmed) {
-  const { mq2Ppm = 0 } = sensors;
-  const dailyFeatures = updateDailyStats(zoneId, sensors) || getDailyFeatures(zoneId);
-  const dangerProbability = dailyFeatures ? scoreLogisticModel(fireModel, dailyFeatures) : 0;
-  const dangerLevel = levelFromProbability(dangerProbability);
+function classifyFire(
+  sensors,
+  zoneId,
+  cameraFireConfirmed,
+  freshSensors = {}
+) {
+  const {
+    mq2Ppm,
+    mq2Ratio,
+  } = sensors;
 
-  if (cameraFireConfirmed) {
+  // Only fresh readings enter today's
+  // rolling statistics.
+  const dailyFeatures =
+    updateDailyStats(
+      zoneId,
+      freshSensors
+    ) ||
+    getDailyFeatures(zoneId);
+
+  const dangerProbability =
+    dailyFeatures
+      ? scoreLogisticModel(
+          fireModel,
+          dailyFeatures
+        )
+      : 0;
+
+  const dangerLevel =
+    levelFromProbability(
+      dangerProbability
+    );
+
+  if (cameraFireConfirmed === true) {
     return {
       level: "severe",
-      cause: "Camera has visually confirmed an active flame",
+      cause:
+        "Camera has visually confirmed an active flame",
       confidence: 0.95,
-      modelType: "camera-confirmed",
-      fireDangerProbability: Math.round(dangerProbability * 100) / 100,
+      modelType:
+        "camera-confirmed",
+      fireDangerProbability:
+        Math.round(
+          dangerProbability * 100
+        ) / 100,
     };
   }
-  if (mq2Ppm >= SENSOR_LIMITS.mq2Ppm.severeAt) {
-    return {
-      level: "severe",
-      cause: "Smoke particulate concentration crossed the high-alert threshold",
-      confidence: 0.85,
-      modelType: "sensor-override (MQ2)",
-      fireDangerProbability: Math.round(dangerProbability * 100) / 100,
-    };
+
+  // Proper calibrated ppm if available
+  if (
+    typeof mq2Ppm === "number"
+  ) {
+    if (
+      mq2Ppm >=
+      SENSOR_LIMITS.mq2Ppm.severeAt
+    ) {
+      return {
+        level: "severe",
+        cause:
+          "Smoke/gas concentration crossed the high-alert threshold",
+        confidence: 0.85,
+        modelType:
+          "sensor override (MQ-2 calibrated)",
+        fireDangerProbability:
+          Math.round(
+            dangerProbability * 100
+          ) / 100,
+      };
+    }
+
+    if (
+      mq2Ppm >=
+      SENSOR_LIMITS.mq2Ppm.moderateAt
+    ) {
+      return {
+        level: "moderate",
+        cause:
+          "Elevated smoke/gas concentration detected",
+        confidence: 0.7,
+        modelType:
+          "sensor override (MQ-2 calibrated)",
+        fireDangerProbability:
+          Math.round(
+            dangerProbability * 100
+          ) / 100,
+      };
+    }
   }
-  if (mq2Ppm >= SENSOR_LIMITS.mq2Ppm.moderateAt) {
-    return {
-      level: "moderate",
-      cause: "Elevated smoke particulate reading; camera has not yet confirmed open flame",
-      confidence: 0.6,
-      modelType: "sensor-override (MQ2)",
-      fireDangerProbability: Math.round(dangerProbability * 100) / 100,
-    };
+
+  // Prototype baseline-relative MQ-2 mode
+  if (
+    typeof mq2Ratio === "number"
+  ) {
+    if (
+      mq2Ratio >=
+      SENSOR_LIMITS.mq2Ratio.severeAt
+    ) {
+      return {
+        level: "severe",
+        cause:
+          "MQ-2 reading rose sharply above its clean-air baseline",
+        confidence: 0.8,
+        modelType:
+          "sensor override (MQ-2 baseline ratio)",
+        fireDangerProbability:
+          Math.round(
+            dangerProbability * 100
+          ) / 100,
+      };
+    }
+
+    if (
+      mq2Ratio >=
+      SENSOR_LIMITS.mq2Ratio.moderateAt
+    ) {
+      return {
+        level: "moderate",
+        cause:
+          "MQ-2 reading is elevated above its clean-air baseline",
+        confidence: 0.65,
+        modelType:
+          "sensor override (MQ-2 baseline ratio)",
+        fireDangerProbability:
+          Math.round(
+            dangerProbability * 100
+          ) / 100,
+      };
+    }
   }
 
   const causeByLevel = {
-    severe: "Trained fire-danger model (min humidity, max temp, rainfall, wind) indicates high ignition risk today",
-    moderate: "Fire-danger model shows elevated ignition risk today; no smoke or flame detected yet",
-    safe: "Fire-danger model and sensors show low ignition risk",
+    severe:
+      "Weather-based fire-danger model indicates high ignition risk",
+    moderate:
+      "Weather-based fire-danger model indicates elevated ignition risk",
+    safe:
+      "Fire-danger model and local sensors show low risk",
   };
+
   return {
     level: dangerLevel,
     cause: causeByLevel[dangerLevel],
-    confidence: Math.round(Math.max(dangerProbability, 1 - dangerProbability) * 100) / 100,
-    modelType: "trained (logistic regression, AUC 0.90 cross-validated)",
-    fireDangerProbability: Math.round(dangerProbability * 100) / 100,
+    confidence:
+      Math.round(
+        Math.max(
+          dangerProbability,
+          1 - dangerProbability
+        ) * 100
+      ) / 100,
+
+    modelType:
+      "trained logistic regression",
+
+    fireDangerProbability:
+      Math.round(
+        dangerProbability * 100
+      ) / 100,
   };
 }
 
@@ -174,7 +346,7 @@ const CLASSIFIERS = { flood: classifyFlood, pollution: classifyPollution };
 
 function classify(hazard, sensors, opts = {}) {
   if (hazard === "fire") {
-    const result = classifyFire(sensors, opts.zoneId, opts.cameraFireConfirmed);
+    const result = classifyFire(sensors, opts.zoneId, opts.cameraFireConfirmed, opts.freshSensors || {});
     return { ...result, confidence: Math.round(Math.min(0.99, result.confidence) * 100) / 100 };
   }
   if (hazard === "earthquake") {

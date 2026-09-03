@@ -122,6 +122,30 @@
       ? `<div class="people-box"><span class="people-count">${zone.peopleDetected.count} ${zone.peopleDetected.count === 1 ? "person" : "people"} detected</span><br>${zone.peopleDetected.note}</div>`
       : `<div class="people-box none">${zone.peopleDetected.note}</div>`;
 
+    const nodeOnline = Boolean(
+      zone.nodeStatus &&
+      zone.nodeStatus.lastSeen &&
+      Date.now() - new Date(zone.nodeStatus.lastSeen).getTime() < 60000
+    );
+    const nodeBox = `
+      <div class="people-box ${nodeOnline ? "" : "none"}">
+        <strong>Sensor node: ${nodeOnline ? "ONLINE" : "OFFLINE"}</strong><br>
+        ${zone.nodeStatus?.nodeId || "No physical node connected"}
+        ${zone.nodeStatus?.lastSeen ? `<br>Last seen: ${new Date(zone.nodeStatus.lastSeen).toLocaleTimeString()}` : ""}
+      </div>
+    `;
+
+    const cameraBox = zone.cameraStatus?.available
+      ? `
+        <div class="camera-frame-wrap">
+          <img class="camera-frame" src="${API_BASE}/api/zones/${zone.id}/camera/latest.jpg?t=${Date.now()}" alt="Live ESP32-CAM frame" onerror="this.style.display='none'">
+          <div class="camera-meta">
+            ${zone.cameraStatus.cameraId || "ESP32-CAM"} · last frame ${zone.cameraStatus.lastSeen ? new Date(zone.cameraStatus.lastSeen).toLocaleTimeString() : "unknown"}
+          </div>
+        </div>
+      `
+      : `<div class="people-box none">Waiting for ESP32-CAM frame</div>`;
+
     return `
       <div class="detail-head"><h2>${zone.name}</h2><span class="badge badge-${zone.level}">${zone.level}</span></div>
       <p class="detail-hazard">${HAZARD_LABEL[zone.hazard]} hazard · updated ${new Date(zone.updatedAt).toLocaleTimeString()}</p>
@@ -140,7 +164,17 @@
       </div>
 
       <div class="detail-section">
-        <h3>Camera — stranded people</h3>
+        <h3>Hardware node</h3>
+        ${nodeBox}
+      </div>
+
+      <div class="detail-section">
+        <h3>ESP32-CAM live view</h3>
+        ${cameraBox}
+      </div>
+
+      <div class="detail-section">
+        <h3>Camera intelligence</h3>
         ${peopleBox}
       </div>
 
@@ -248,7 +282,7 @@
     if (zone.sensors.aqi !== undefined) bump.aqi = zone.sensors.aqi + 100;
 
     try {
-      const { smsSent } = await apiPost(`/api/zones/${zone.id}/telemetry`, { sensors: bump });
+      const { smsSent } = await apiPost(`/api/zones/${zone.id}/telemetry`, { nodeId: "SIMULATION", sensors: bump });
       await loadZones();
       await refreshSmsLog();
       showToast(smsSent ? `SMS auto-dispatched — ${zone.name}` : `${zone.name} escalated`);

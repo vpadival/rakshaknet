@@ -23,6 +23,7 @@ app.use(express.static(FRONTEND_DIR));
 
 // ---------- In-memory zone store, seeded once at boot ----------
 const zones = new Map();
+const cameraFrames = new Map();
 seedZones.forEach((z) => {
   const result = classify(z.hazard, z.sensors, { zoneId: z.id });
   zones.set(z.id, {
@@ -34,14 +35,61 @@ seedZones.forEach((z) => {
     flags: computeFlags(z.sensors),
     citizenMessage: citizenMessage(z.hazard, result.level),
     updatedAt: new Date().toISOString(),
+    nodeStatus: {
+      nodeId: null,
+      lastSeen: null,
+      online: false,
+    },
+    cameraStatus: {
+      cameraId: null,
+      lastSeen: null,
+      available: false,
+    },
   });
 });
 
 let lastMassEventZoneCount = 0;
 
 function serializeZone(z) {
-  const { id, name, hazard, lat, lng, sensors, level, mlCause, confidence, modelType, flags, peopleDetected, safeZone, citizenMessage, updatedAt } = z;
-  return { id, name, hazard, lat, lng, sensors, level, mlCause, confidence, modelType, flags, peopleDetected, safeZone, citizenMessage, updatedAt };
+  const {
+    id,
+    name,
+    hazard,
+    lat,
+    lng,
+    sensors,
+    level,
+    mlCause,
+    confidence,
+    modelType,
+    flags,
+    peopleDetected,
+    safeZone,
+    citizenMessage,
+    updatedAt,
+    nodeStatus,
+    cameraStatus,
+  } = z;
+
+  return {
+    id,
+    name,
+    hazard,
+    lat,
+    lng,
+    sensors,
+    level,
+    mlCause,
+    confidence,
+    modelType,
+    flags,
+    peopleDetected,
+    safeZone,
+    citizenMessage,
+    updatedAt,
+    nodeStatus,
+    cameraStatus,
+  };
 }
 
 function haversineKm(lat1, lng1, lat2, lng2) {
@@ -92,39 +140,210 @@ app.get("/api/zones/:id", (req, res) => {
 // Body can include a partial `sensors` object, `peopleDetected`, and
 // `cameraFireConfirmed` (boolean — set by a camera-side fire-detection model
 // once one exists; not inferred here).
-app.post("/api/zones/:id/telemetry", async (req, res) => {
-  const zone = zones.get(req.params.id);
-  if (!zone) return res.status(404).json({ error: "Zone not found" });
+app.post(
+  "/api/zones/:id/telemetry",
+  async (req, res) => {
+    const zone =
+      zones.get(req.params.id);
 
-  const { sensors, peopleDetected, cameraFireConfirmed } = req.body || {};
-  const previousLevel = zone.level;
-  const rangeWarnings = [];
+    if (!zone) {
+      return res.status(404).json({
+        error: "Zone not found",
+      });
+    }
 
-  if (sensors) {
-    Object.entries(sensors).forEach(([key, value]) => {
-      const check = checkSensorRange(key, value);
-      if (!check.inRange) rangeWarnings.push(check.note);
+    const {
+      nodeId,
+      timestamp,
+      sensors,
+      peopleDetected,
+      cameraFireConfirmed,
+    } = req.body || {};
+
+    if (
+      !nodeId ||
+      typeof nodeId !== "string"
+    ) {
+      return res.status(400).json({
+        error: "nodeId is required",
+      });
+    }
+
+    const receivedTimestamp =
+      typeof timestamp === "number"
+        ? timestamp
+        : Date.now();
+
+    const previousLevel = zone.level;
+
+    const rangeWarnings = [];
+    const validSensors = {};
+
+    if (sensors) {
+      for (
+        const [key, value]
+        of Object.entries(sensors)
+      ) {
+        // CPCB pollutant object is handled
+        // by classifyPollution.
+        if (key === "pollutants") {
+          validSensors[key] = value;
+          continue;
+        }
+
+        const check =
+          checkSensorRange(
+            key,
+            value
+          );
+
+        if (!check.inRange) {
+          rangeWarnings.push(
+            check.note
+          );
+
+          // IMPORTANT:
+          // bad hardware data is rejected.
+          continue;
+        }
+
+        validSensors[key] = value;
+      }
+
+      zone.sensors = {
+        ...zone.sensors,
+        ...validSensors,
+      };
+    }
+
+    if (peopleDetected) {
+      zone.peopleDetected = {
+        ...zone.peopleDetected,
+        ...peopleDetected,
+      };
+    }
+
+    zone.nodeStatus = {
+      nodeId,
+      lastSeen:
+        new Date(
+          receivedTimestamp
+        ).toISOString(),
+      online: true,
+    };
+
+    const result = classify(
+      zone.hazard,
+      zone.sensors,
+      {
+        zoneId: zone.id,
+
+        cameraFireConfirmed,
+
+        // Only genuinely new sensor values
+        // enter rolling aggregators.
+        freshSensors:
+          validSensors,
+      }
+    );
+
+    zone.level = result.level;
+    zone.mlCause = result.cause;
+    zone.confidence =
+      result.confidence;
+
+    zone.modelType =
+      result.modelType;
+
+    zone.flags =
+      computeFlags(
+        zone.sensors
+      );
+
+    zone.citizenMessage =
+      citizenMessage(
+        zone.hazard,
+        result.level
+      );
+
+    zone.updatedAt =
+      new Date().toISOString();
+
+    let smsSent = null;
+
+    if (
+      SEVERE_AUTO_SMS &&
+      zone.level === "severe" &&
+      previousLevel !== "severe"
+    ) {
+      smsSent =
+        await smsGateway.sendSms({
+          zoneId: zone.id,
+          zoneName: zone.name,
+          message:
+            zone.citizenMessage,
+        });
+    }
+
+    const massEventSms =
+      await checkMassEvent();
+
+    res.json({
+      ok: true,
+      zone:
+        serializeZone(zone),
+      smsSent,
+      massEventSms,
+      rangeWarnings,
     });
-    zone.sensors = { ...zone.sensors, ...sensors };
   }
-  if (peopleDetected) zone.peopleDetected = { ...zone.peopleDetected, ...peopleDetected };
+);
 
-  const result = classify(zone.hazard, zone.sensors, { zoneId: zone.id, cameraFireConfirmed });
-  zone.level = result.level;
-  zone.mlCause = result.cause;
-  zone.confidence = result.confidence;
-  zone.modelType = result.modelType;
-  zone.flags = computeFlags(zone.sensors);
-  zone.citizenMessage = citizenMessage(zone.hazard, result.level);
-  zone.updatedAt = new Date().toISOString();
+// ---------- ESP32-CAM ----------
 
-  let smsSent = null;
-  if (SEVERE_AUTO_SMS && zone.level === "severe" && previousLevel !== "severe") {
-    smsSent = await smsGateway.sendSms({ zoneId: zone.id, zoneName: zone.name, message: zone.citizenMessage });
+// ESP32-CAM uploads a raw JPEG body here.
+app.post(
+  "/api/zones/:id/camera/frame",
+  express.raw({
+    type: "image/jpeg",
+    limit: "2mb",
+  }),
+  (req, res) => {
+    const zone = zones.get(req.params.id);
+
+    if (!zone) {
+      return res.status(404).json({ error: "Zone not found" });
+    }
+
+    if (!req.body || req.body.length === 0) {
+      return res.status(400).json({ error: "JPEG body is empty" });
+    }
+
+    const cameraId = req.header("X-Camera-ID") || "ESP32-CAM";
+    cameraFrames.set(zone.id, Buffer.from(req.body));
+    zone.cameraStatus = {
+      cameraId,
+      available: true,
+      lastSeen: new Date().toISOString(),
+    };
+
+    res.json({ ok: true, bytes: req.body.length, cameraId });
   }
-  const massEventSms = await checkMassEvent();
+);
 
-  res.json({ zone: serializeZone(zone), smsSent, massEventSms, rangeWarnings });
+// Dashboard fetches the latest camera frame here.
+app.get("/api/zones/:id/camera/latest.jpg", (req, res) => {
+  const frame = cameraFrames.get(req.params.id);
+
+  if (!frame) {
+    return res.status(404).send("No camera frame available");
+  }
+
+  res.set({
+    "Content-Type": "image/jpeg",
+    "Cache-Control": "no-store, no-cache, must-revalidate",
+  });
+  res.send(frame);
 });
 
 // Manually report (or relay from real accelerometer/geophone hardware
@@ -203,8 +422,8 @@ app.get(/^(?!\/api\/).*/, (req, res) => {
   res.sendFile(path.join(FRONTEND_DIR, "index.html"));
 });
 
-app.listen(PORT, () => {
-  console.log(`RakshakNet server listening on http://localhost:${PORT}`);
+app.listen(PORT, "0.0.0.0", () => {
+  console.log(`RakshakNet server running on port ${PORT}`);
   console.log(`  Dashboard: http://localhost:${PORT}`);
   console.log(`  API:       http://localhost:${PORT}/api/zones`);
 });

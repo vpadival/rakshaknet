@@ -2,15 +2,15 @@
 // (see backend/server.js) via the API_BASE endpoints in app.js — this file
 // no longer holds a hardcoded ZONES array.
 
-// Relative so it works whether the dashboard is served by the backend itself
-// (http://localhost:4000) or hosted elsewhere. Falls back to localhost:4000
-// only when opened directly as a file:// URL, where relative fetches can't work.
-const API_BASE = window.location.protocol === "file:" ? "http://localhost:4000" : "";
+// Same-origin API. A separately hosted frontend can replace this with the
+// deployed backend URL at build/deployment time.
+const API_BASE = "";
 
 const HAZARD_LABEL = {
   flood: "Flood",
   fire: "Forest fire",
   pollution: "Air pollution",
+  earthquake: "Earthquake",
 };
 
 const LEVEL_COLOR = {

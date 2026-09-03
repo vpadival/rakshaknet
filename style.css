@@ -227,6 +227,17 @@ button{ font-family: inherit; cursor:pointer; }
 }
 .people-count{ font-family: var(--font-mono); font-weight:700; font-size:16px; color: var(--severe); }
 
+.camera-frame-wrap{ width:100%; }
+.camera-frame{
+  display:block;
+  width:100%;
+  max-height:320px;
+  object-fit:cover;
+  border-radius:10px;
+  background:#111;
+}
+.camera-meta{ margin-top:6px; font-size:11px; opacity:0.7; }
+
 .citizen-status{
   text-align:center;
   padding: 22px 12px;
