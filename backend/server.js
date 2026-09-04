@@ -5,6 +5,7 @@ const { seedZones } = require("./seedData");
 const { classify, citizenMessage, computeFlags } = require("./classify");
 const { checkSensorRange } = require("./sensorLimits");
 const smsGateway = require("./smsGateway");
+const { getEvacuationGuidance, buildEmergencySms } = require("./evacuationGuidance");
 
 const PORT = process.env.PORT || 4000;
 const SEVERE_AUTO_SMS = true; // fire an SMS automatically the moment a zone crosses into "severe"
@@ -67,9 +68,22 @@ function serializeZone(z) {
     safeZone,
     citizenMessage,
     updatedAt,
-    nodeStatus,
     cameraStatus,
   } = z;
+
+  let nodeStatus = z.nodeStatus || {
+    nodeId: null,
+    lastSeen: null,
+    online: false,
+  };
+
+  if (nodeStatus.lastSeen) {
+    const lastSeenMs = new Date(nodeStatus.lastSeen).getTime();
+    nodeStatus = {
+      ...nodeStatus,
+      online: Number.isFinite(lastSeenMs) && Date.now() - lastSeenMs < 60000,
+    };
+  }
 
   return {
     id,
@@ -89,6 +103,7 @@ function serializeZone(z) {
     updatedAt,
     nodeStatus,
     cameraStatus,
+    evacuationGuidance: getEvacuationGuidance(hazard),
   };
 }
 
@@ -277,8 +292,8 @@ app.post(
         await smsGateway.sendSms({
           zoneId: zone.id,
           zoneName: zone.name,
-          message:
-            zone.citizenMessage,
+          message: buildEmergencySms({ hazard: zone.hazard, level: zone.level, zoneName: zone.name, safeZone: zone.safeZone }),
+          type: "automatic-severe-alert",
         });
     }
 
@@ -364,7 +379,7 @@ app.post("/api/zones/:id/earthquake", async (req, res) => {
 
   let smsSent = null;
   if (zone.level === "severe") {
-    smsSent = await smsGateway.sendSms({ zoneId: zone.id, zoneName: zone.name, message: zone.citizenMessage });
+    smsSent = await smsGateway.sendSms({ zoneId: zone.id, zoneName: zone.name, message: buildEmergencySms({ hazard: zone.hazard, level: zone.level, zoneName: zone.name, safeZone: zone.safeZone }), type: "automatic-severe-alert" });
   }
   res.json({ zone: serializeZone(zone), smsSent });
 });
@@ -404,8 +419,8 @@ app.post("/api/checkin", (req, res) => {
 app.post("/api/zones/:id/sms", async (req, res) => {
   const zone = zones.get(req.params.id);
   if (!zone) return res.status(404).json({ error: "Zone not found" });
-  const message = (req.body && req.body.message) || zone.citizenMessage;
-  const entry = await smsGateway.sendSms({ zoneId: zone.id, zoneName: zone.name, message });
+  const message = (req.body && req.body.message) || buildEmergencySms({ hazard: zone.hazard, level: zone.level, zoneName: zone.name, safeZone: zone.safeZone });
+  const entry = await smsGateway.sendSms({ zoneId: zone.id, zoneName: zone.name, message, type: "manual-alert" });
   res.json(entry);
 });
 

@@ -187,11 +187,19 @@
 
   function citizenDetail(zone) {
     const levelCopy = { safe: "All clear", moderate: "Elevated risk", severe: "Severe threat" };
+    const guidance = zone.evacuationGuidance;
     const peopleBox = zone.peopleDetected.count > 0
       ? `<div class="people-box"><span class="people-count">${zone.peopleDetected.count} ${zone.peopleDetected.count === 1 ? "person" : "people"} may need help nearby</span><br>If it's safe to do so, assist or alert responders.</div>`
       : "";
 
     const mapsUrl = `https://www.google.com/maps/dir/?api=1&destination=${zone.safeZone.lat},${zone.safeZone.lng}`;
+    const list = (items, className = "") => `<ul class="safety-list ${className}">${items.map((item) => `<li>${item}</li>`).join("")}</ul>`;
+    const emergencyBag = guidance
+      ? `<div class="emergency-bag-card"><div class="emergency-bag-title">Emergency go-bag</div><div class="emergency-bag-items">${guidance.carry.slice(0, 7).map((item) => `<span>${item}</span>`).join("")}</div></div>`
+      : "";
+    const evacuationGuide = guidance
+      ? `<div class="detail-section evacuation-guide"><h3>${guidance.title}</h3><h4>Take with you</h4>${list(guidance.carry)}<h4>Before leaving</h4>${list(guidance.beforeLeaving)}<h4>While moving</h4>${list(guidance.whileMoving)}<h4>Avoid</h4>${list(guidance.avoid, "safety-list-danger")}<h4>Before I leave</h4>${list(guidance.steps)}</div>`
+      : "";
 
     return `
       <div class="citizen-status" style="background:${LEVEL_COLOR[zone.level]}22; border:1px solid ${LEVEL_COLOR[zone.level]};">
@@ -205,7 +213,9 @@
         <h3>Nearest safe area</h3>
         <div class="safe-zone-name">${zone.safeZone.name}${zone.safeZone.distanceKm ? ` · ${zone.safeZone.distanceKm} km away` : ""}</div>
         ${zone.level !== "safe" ? `<a class="nav-btn" href="${mapsUrl}" target="_blank" rel="noopener">Navigate to safe area</a>` : ""}
+        ${emergencyBag}
       </div>
+      ${evacuationGuide}
     `;
   }
 
@@ -298,7 +308,7 @@
       const zone = ZONES.find((z) => z.id === selectedZoneId);
       if (!zone) return;
       try {
-        await apiPost(`/api/zones/${zone.id}/sms`, { message: zone.citizenMessage });
+        await apiPost(`/api/zones/${zone.id}/sms`, {});
         await refreshSmsLog();
         showToast(`SMS alert dispatched — ${zone.name}`);
       } catch (err) {

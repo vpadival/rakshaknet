@@ -263,6 +263,16 @@ button{ font-family: inherit; cursor:pointer; }
 .nav-btn:hover{ opacity:0.92; }
 .safe-zone-name{ font-size:13px; margin: 8px 0 14px; color: var(--text-muted); }
 
+.evacuation-guide{ margin-top:16px; }
+.evacuation-guide h4{ margin:14px 0 7px; font-size:13px; }
+.safety-list{ margin:0 0 12px; padding-left:20px; }
+.safety-list li{ margin-bottom:6px; line-height:1.45; }
+.safety-list-danger{ border-left:3px solid var(--severe); padding-left:20px; list-style-position:inside; }
+.emergency-bag-card{ margin-top:14px; padding:14px; border:1px solid var(--border); border-radius:8px; background:var(--panel-raised); }
+.emergency-bag-title{ font-weight:700; margin-bottom:10px; }
+.emergency-bag-items{ display:flex; flex-wrap:wrap; gap:7px; }
+.emergency-bag-items span{ padding:5px 9px; border-radius:999px; font-size:12px; background:rgba(91,141,239,0.14); color:var(--text); }
+
 /* ---------- SMS log ---------- */
 .sms-log{
   border-top: 1px solid var(--border);
