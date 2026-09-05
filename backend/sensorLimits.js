@@ -3,6 +3,7 @@
 const DEMO_MODE = process.env.DEMO_MODE === "true";
 
 const SENSOR_LIMITS = {
+  windGustKmh: { unit: "km/h", plausibleMin: 0, plausibleMax: 500 },
   waterLevelM: {
     unit: "m",
     plausibleMin: 0,
@@ -100,13 +101,13 @@ const SENSOR_LIMITS = {
 };
 
 function checkSensorRange(key, value) {
-  const limits = SENSOR_LIMITS[key];
+  const limits = Object.hasOwn(SENSOR_LIMITS, key) ? SENSOR_LIMITS[key] : null;
 
   // Some compound values such as pollutants are validated separately.
   if (!limits) {
     return {
-      inRange: true,
-      note: null,
+      inRange: false,
+      note: `Unknown sensor: ${key}`,
     };
   }
 

@@ -45,13 +45,15 @@ const BREAKPOINTS = {
 };
 
 function subIndex(pollutant, concentration) {
-  const table = BREAKPOINTS[pollutant];
-  if (!table || concentration === undefined || concentration === null) return null;
+  const table = Object.hasOwn(BREAKPOINTS, pollutant) ? BREAKPOINTS[pollutant] : null;
+  if (!table || !Number.isFinite(concentration) || concentration < 0) return null;
   const clamped = Math.max(0, concentration);
   for (const [cLow, cHigh, iLow, iHigh] of table) {
     if (clamped >= cLow && clamped <= cHigh) {
       return iLow + ((iHigh - iLow) / (cHigh - cLow)) * (clamped - cLow);
     }
+    // Decimal readings in gaps between published bands use the next band's floor.
+    if (clamped < cLow) return iLow;
   }
   // Above the top breakpoint: extrapolate off the last band rather than
   // silently dropping the pollutant from consideration.

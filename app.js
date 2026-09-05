@@ -4,6 +4,15 @@
   let ZONES = [];
   const markers = {};
   const POLL_MS = 5000;
+  let zonesLoading = false;
+  const escapeHtml = (value) => String(value ?? "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[char]));
+  // Escape server-controlled strings before interpolating them into HTML.
+  function escapeData(value) {
+    if (typeof value === "string") return escapeHtml(value);
+    if (Array.isArray(value)) return value.map(escapeData);
+    if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, escapeData(item)]));
+    return value;
+  }
 
   // ---------- Map setup ----------
   const map = L.map("map", { zoomControl: true }).setView([21.5, 82.5], 5);
@@ -21,7 +30,7 @@
 
   // ---------- API layer ----------
   async function apiGet(path) {
-    const res = await fetch(`${API_BASE}${path}`);
+    const res = await fetch(`${API_BASE}${path}`, { signal: AbortSignal.timeout(15000), cache: "no-store" });
     if (!res.ok) throw new Error(`GET ${path} failed: ${res.status}`);
     return res.json();
   }
@@ -30,6 +39,7 @@
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body || {}),
+      signal: AbortSignal.timeout(30000),
     });
     if (!res.ok) throw new Error(`POST ${path} failed: ${res.status}`);
     return res.json();
@@ -42,20 +52,22 @@
   }
 
   async function loadZones({ isFirstLoad = false } = {}) {
+    if (zonesLoading) return;
+    zonesLoading = true;
     try {
       const data = await apiGet("/api/zones");
       ZONES = data;
       setConnectionStatus(true);
 
-      if (isFirstLoad) {
-        ZONES.forEach((zone) => {
+      ZONES.forEach((zone) => {
+        if (!markers[zone.id]) {
           const marker = L.marker([zone.lat, zone.lng], { icon: markerIcon(zone.level) }).addTo(map);
           marker.on("click", () => selectZone(zone.id));
           markers[zone.id] = marker;
-        });
-        selectedZoneId = ZONES[0] && ZONES[0].id;
-      } else {
-        ZONES.forEach((zone) => markers[zone.id] && markers[zone.id].setIcon(markerIcon(zone.level)));
+        } else markers[zone.id].setIcon(markerIcon(zone.level));
+      });
+      if (!ZONES.some((zone) => zone.id === selectedZoneId)) {
+        selectedZoneId = (ZONES.find((zone) => zone.id === "z4") || ZONES[0])?.id;
       }
 
       renderZoneList();
@@ -67,7 +79,7 @@
         document.getElementById("zoneItems").innerHTML =
           `<p style="color:var(--text-muted);font-size:12px;">Can't reach the backend at ${API_BASE}. Start it with <code>npm start</code> in /backend, then reload.</p>`;
       }
-    }
+    } finally { zonesLoading = false; }
   }
 
   // ---------- Zone list ----------
@@ -79,7 +91,7 @@
       card.className = "zone-card" + (zone.id === selectedZoneId ? " selected" : "");
       card.innerHTML = `
         <div class="zone-card-top">
-          <span class="zone-card-name">${zone.name}</span>
+          <span class="zone-card-name">${escapeHtml(zone.name)}</span>
           <span class="badge badge-${zone.level}">${zone.level}</span>
         </div>
         <div class="zone-card-meta">${HAZARD_LABEL[zone.hazard]}${zone.peopleDetected.count > 0 ? ` · ${zone.peopleDetected.count} detected` : ""}</div>
@@ -105,7 +117,11 @@
       panel.innerHTML = `<div class="detail-empty">Select a zone to view details</div>`;
       return;
     }
-    panel.innerHTML = currentView === "authority" ? authorityDetail(zone) : citizenDetail(zone);
+    const displayZone = escapeData(zone);
+    panel.innerHTML = currentView === "authority" ? authorityDetail(displayZone) : citizenDetail(displayZone);
+    if (zone.nodeStatus?.lastSeen && !zone.nodeStatus.online) {
+      panel.insertAdjacentHTML("afterbegin", '<div class="people-box">Sensor node offline. Readings and assessment below are from its last report.</div>');
+    }
   }
 
   function authorityDetail(zone) {
@@ -113,7 +129,7 @@
       .map(([key, value]) => `
         <div class="reading">
           <div class="reading-label">${readingLabel(key)}</div>
-          <div class="reading-value">${value}${readingUnit(key)}</div>
+          <div class="reading-value">${typeof value === "object" ? Object.entries(value).map(([pollutant, concentration]) => `${escapeHtml(pollutant)}: ${concentration}`).join("<br>") : value}${readingUnit(key)}</div>
         </div>
       `)
       .join("");
@@ -122,11 +138,7 @@
       ? `<div class="people-box"><span class="people-count">${zone.peopleDetected.count} ${zone.peopleDetected.count === 1 ? "person" : "people"} detected</span><br>${zone.peopleDetected.note}</div>`
       : `<div class="people-box none">${zone.peopleDetected.note}</div>`;
 
-    const nodeOnline = Boolean(
-      zone.nodeStatus &&
-      zone.nodeStatus.lastSeen &&
-      Date.now() - new Date(zone.nodeStatus.lastSeen).getTime() < 60000
-    );
+    const nodeOnline = Boolean(zone.nodeStatus?.online);
     const nodeBox = `
       <div class="people-box ${nodeOnline ? "" : "none"}">
         <strong>Sensor node: ${nodeOnline ? "ONLINE" : "OFFLINE"}</strong><br>
@@ -152,13 +164,14 @@
 
       <div class="detail-section">
         <h3>Live sensor readings</h3>
-        <div class="reading-grid">${readings}</div>
+        <div class="reading-grid">${readings || "Waiting for sensor readings"}</div>
       </div>
 
       <div class="detail-section">
-        <h3>ML-predicted cause</h3>
+        <h3>Hazard assessment</h3>
         <div class="ml-box">
           ${zone.mlCause}
+          <div class="ml-confidence">${zone.modelType}</div>
           <div class="ml-confidence">confidence: ${(zone.confidence * 100).toFixed(0)}%</div>
         </div>
       </div>
@@ -186,7 +199,7 @@
   }
 
   function citizenDetail(zone) {
-    const levelCopy = { safe: "All clear", moderate: "Elevated risk", severe: "Severe threat" };
+    const levelCopy = { unknown: "Awaiting sensor data", safe: "All clear", moderate: "Elevated risk", severe: "Severe threat" };
     const guidance = zone.evacuationGuidance;
     const peopleBox = zone.peopleDetected.count > 0
       ? `<div class="people-box"><span class="people-count">${zone.peopleDetected.count} ${zone.peopleDetected.count === 1 ? "person" : "people"} may need help nearby</span><br>If it's safe to do so, assist or alert responders.</div>`
@@ -227,12 +240,18 @@
       tempC: "Temperature",
       humidityPct: "Humidity",
       mq2Ppm: "MQ2 gas (ppm)",
+      mq2Raw: "MQ2 raw (ADC)",
+      mq2Ratio: "MQ2 / clean-air baseline",
+      rainIntensityPct: "Rain plate wetness",
+      windGustKmh: "Wind gust (km/h)",
+      pollutants: "Pollutant concentrations",
       aqi: "Air Quality Index",
     };
     return labels[key] || key;
   }
   function readingUnit(key) {
     if (key === "tempC") return "°C";
+    if (key === "mq2Ratio") return "×";
     if (key.endsWith("Pct")) return "%";
     return "";
   }
@@ -247,9 +266,9 @@
         .map(
           (entry) => `
             <div class="sms-entry">
-              <span class="sms-time">${new Date(entry.timestamp).toLocaleTimeString()}</span>
-              <span class="sms-zone">${entry.zoneName}</span>
-              <span>"${entry.message}"</span>
+              <span class="sms-time">${new Date(entry.sentAt || entry.timestamp).toLocaleTimeString()}</span>
+              <span class="sms-zone">${escapeHtml(entry.zoneName)} · ${escapeHtml(entry.status)}</span>
+              <span>"${escapeHtml(entry.message)}"</span>
             </div>`
         )
         .join("");
@@ -263,6 +282,11 @@
     toast.textContent = message;
     toast.classList.add("show");
     setTimeout(() => toast.classList.remove("show"), 2600);
+  }
+
+  function smsOutcome(result) {
+    const entries = Array.isArray(result) ? result : [result];
+    return entries.filter(Boolean).map((entry) => entry.status).join(", ") || "no dispatch";
   }
 
   // ---------- View toggle ----------
@@ -282,7 +306,7 @@
 
   // ---------- Escalation simulation (demo aid — posts real telemetry to the backend) ----------
   document.getElementById("simulateBtn").addEventListener("click", async () => {
-    const zone = ZONES.find((z) => z.level !== "severe") || ZONES[0];
+    const zone = ZONES.find((z) => z.id !== "z4" && !z.nodeStatus?.lastSeen && z.level !== "severe");
     if (!zone) return;
 
     const bump = {};
@@ -295,7 +319,7 @@
       const { smsSent } = await apiPost(`/api/zones/${zone.id}/telemetry`, { nodeId: "SIMULATION", sensors: bump });
       await loadZones();
       await refreshSmsLog();
-      showToast(smsSent ? `SMS auto-dispatched — ${zone.name}` : `${zone.name} escalated`);
+      showToast(`${zone.name} updated · SMS: ${smsOutcome(smsSent)}`);
       if (zone.id === selectedZoneId) renderDetail();
     } catch (err) {
       showToast("Backend unreachable — start the server on :4000");
@@ -308,9 +332,9 @@
       const zone = ZONES.find((z) => z.id === selectedZoneId);
       if (!zone) return;
       try {
-        await apiPost(`/api/zones/${zone.id}/sms`, {});
+        const result = await apiPost(`/api/zones/${zone.id}/sms`, {});
         await refreshSmsLog();
-        showToast(`SMS alert dispatched — ${zone.name}`);
+        showToast(`SMS: ${smsOutcome(result)} — ${zone.name}`);
       } catch (err) {
         showToast("Backend unreachable — start the server on :4000");
       }

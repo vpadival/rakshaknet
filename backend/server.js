@@ -20,13 +20,16 @@ app.use(express.json());
 // Serve the dashboard from the same server/port as the API, so opening
 // http://localhost:4000 in a browser works with no separate static server
 // and no CORS/relative-path issues. API routes below take priority.
-app.use(express.static(FRONTEND_DIR));
+for (const file of ["index.html", "style.css", "app.js", "data.js"]) {
+  app.get(`/${file}`, (req, res) => res.sendFile(path.join(FRONTEND_DIR, file)));
+}
+app.use("/assets", express.static(path.join(FRONTEND_DIR, "assets")));
 
 // ---------- In-memory zone store, seeded once at boot ----------
 const zones = new Map();
 const cameraFrames = new Map();
 seedZones.forEach((z) => {
-  const result = classify(z.hazard, z.sensors, { zoneId: z.id });
+  const result = classify(z.hazard, z.sensors, { zoneId: z.id, freshSensors: z.sensors });
   zones.set(z.id, {
     ...z,
     level: result.level,
@@ -181,11 +184,21 @@ app.post(
       });
     }
 
-    const timestampMs =
-      typeof timestamp === "number" &&
-      Number.isFinite(timestamp)
-        ? timestamp
-        : Date.now();
+    const isObject = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
+    if (sensors !== undefined && !isObject(sensors)) return res.status(400).json({ error: "sensors must be an object" });
+    if (cameraFireConfirmed !== undefined && typeof cameraFireConfirmed !== "boolean") return res.status(400).json({ error: "cameraFireConfirmed must be boolean" });
+    if (peopleDetected !== undefined && (!isObject(peopleDetected) ||
+        !Number.isInteger(peopleDetected.count) || peopleDetected.count < 0 ||
+        (peopleDetected.note !== undefined && typeof peopleDetected.note !== "string"))) {
+      return res.status(400).json({ error: "peopleDetected requires a non-negative integer count and optional text note" });
+    }
+    const timestampMs = timestamp === undefined ? Date.now() : timestamp;
+    if (!Number.isFinite(timestampMs) || !Number.isFinite(new Date(timestampMs).getTime()) || timestampMs > Date.now() + 60000 || timestampMs < Date.now() - 86400000) {
+      return res.status(400).json({ error: "timestamp must be Unix milliseconds within the last day (at most 60 seconds ahead)" });
+    }
+    if (zone.lastTelemetryTimestampMs !== undefined && timestampMs < zone.lastTelemetryTimestampMs) {
+      return res.status(409).json({ error: "Telemetry is older than the latest accepted reading" });
+    }
 
     const previousLevel = zone.level;
 
@@ -200,7 +213,14 @@ app.post(
         // CPCB pollutant object is handled
         // by classifyPollution.
         if (key === "pollutants") {
-          validSensors[key] = value;
+          if (!isObject(value)) { rangeWarnings.push("pollutants must be an object"); continue; }
+          const pollutants = {};
+          for (const [name, concentration] of Object.entries(value)) {
+            if (!["PM2.5", "PM10", "NO2", "SO2", "CO", "O3", "NH3"].includes(name) || !Number.isFinite(concentration) || concentration < 0) {
+              rangeWarnings.push(`Invalid pollutant concentration: ${name}`);
+            } else pollutants[name] = concentration;
+          }
+          if (Object.keys(pollutants).length) validSensors[key] = { ...zone.sensors.pollutants, ...pollutants };
           continue;
         }
 
@@ -241,6 +261,8 @@ app.post(
       lastSeen: new Date().toISOString(),
       online: true,
     };
+    zone.lastTelemetryTimestampMs = timestampMs;
+    if (cameraFireConfirmed !== undefined) zone.cameraFireConfirmed = cameraFireConfirmed;
 
     const result = classify(
       zone.hazard,
@@ -248,7 +270,8 @@ app.post(
       {
         zoneId: zone.id,
 
-        cameraFireConfirmed,
+        cameraFireConfirmed: zone.cameraFireConfirmed,
+        reportedMagnitude: zone.reportedMagnitude,
 
         // Only genuinely new sensor values
         // enter rolling aggregators.
@@ -366,7 +389,9 @@ app.post("/api/zones/:id/earthquake", async (req, res) => {
   const zone = zones.get(req.params.id);
   if (!zone) return res.status(404).json({ error: "Zone not found" });
   const { magnitude } = req.body || {};
-  if (typeof magnitude !== "number") return res.status(400).json({ error: "magnitude (number) is required" });
+  if (!Number.isFinite(magnitude) || magnitude < 0 || magnitude > 10) return res.status(400).json({ error: "magnitude must be between 0 and 10" });
+  const previousLevel = zone.level;
+  zone.reportedMagnitude = magnitude;
 
   const result = classify("earthquake", {}, { reportedMagnitude: magnitude });
   zone.hazard = "earthquake";
@@ -378,10 +403,11 @@ app.post("/api/zones/:id/earthquake", async (req, res) => {
   zone.updatedAt = new Date().toISOString();
 
   let smsSent = null;
-  if (zone.level === "severe") {
+  if (zone.level === "severe" && previousLevel !== "severe") {
     smsSent = await smsGateway.sendSms({ zoneId: zone.id, zoneName: zone.name, message: buildEmergencySms({ hazard: zone.hazard, level: zone.level, zoneName: zone.name, safeZone: zone.safeZone }), type: "automatic-severe-alert" });
   }
-  res.json({ zone: serializeZone(zone), smsSent });
+  const massEventSms = await checkMassEvent();
+  res.json({ zone: serializeZone(zone), smsSent, massEventSms });
 });
 
 // Citizen phone-geolocation check-in: no GPS module on the hardware, so this
@@ -390,7 +416,7 @@ app.post("/api/zones/:id/earthquake", async (req, res) => {
 // nothing is close enough to be meaningful.
 app.post("/api/checkin", (req, res) => {
   const { lat, lng } = req.body || {};
-  if (typeof lat !== "number" || typeof lng !== "number") {
+  if (!Number.isFinite(lat) || !Number.isFinite(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180) {
     return res.status(400).json({ error: "lat and lng (numbers) are required" });
   }
 
@@ -420,6 +446,7 @@ app.post("/api/zones/:id/sms", async (req, res) => {
   const zone = zones.get(req.params.id);
   if (!zone) return res.status(404).json({ error: "Zone not found" });
   const message = (req.body && req.body.message) || buildEmergencySms({ hazard: zone.hazard, level: zone.level, zoneName: zone.name, safeZone: zone.safeZone });
+  if (typeof message !== "string" || message.length > 1600) return res.status(400).json({ error: "message must be text of at most 1600 characters" });
   const entry = await smsGateway.sendSms({ zoneId: zone.id, zoneName: zone.name, message, type: "manual-alert" });
   res.json(entry);
 });
@@ -431,12 +458,13 @@ app.get("/api/sms-log", (req, res) => {
 app.get("/api/health", (req, res) => res.json({ status: "ok", zones: zones.size }));
 
 // Anything else that isn't an API route falls back to index.html (simple SPA-style routing).
-app.get(/^(?!\/api\/).*/, (req, res) => {
+app.get("/", (req, res) => {
   res.sendFile(path.join(FRONTEND_DIR, "index.html"));
 });
 
-app.listen(PORT, "0.0.0.0", () => {
+if (require.main === module) app.listen(PORT, "0.0.0.0", () => {
   console.log(`RakshakNet listening on port ${PORT}`);
   console.log(`  Dashboard: http://localhost:${PORT}`);
   console.log(`  API:       http://localhost:${PORT}/api/zones`);
 });
+module.exports = app;

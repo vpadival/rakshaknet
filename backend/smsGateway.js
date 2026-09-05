@@ -1,5 +1,3 @@
-const twilio = require("twilio");
-
 const smsLog = [];
 
 const {
@@ -22,6 +20,7 @@ let client = null;
 
 if (validTwilioConfig()) {
   try {
+    const twilio = require("twilio");
     client = twilio(
       TWILIO_ACCOUNT_SID,
       TWILIO_AUTH_TOKEN

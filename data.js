@@ -14,6 +14,7 @@ const HAZARD_LABEL = {
 };
 
 const LEVEL_COLOR = {
+  unknown: "#8993A4",
   safe: "#3FA796",
   moderate: "#E3B341",
   severe: "#C24A2B",

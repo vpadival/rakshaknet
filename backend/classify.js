@@ -40,6 +40,9 @@ function levelFromProbability(p) {
 // Revisit with a real historical flood dataset if one becomes available.
 // ---------------------------------------------------------------------------
 function classifyFlood(sensors) {
+  if (!["waterLevelM", "rainfallMmHr", "rainIntensityPct", "soilMoisturePct"].some((key) => Number.isFinite(sensors[key]))) {
+    return { level: "unknown", cause: "Waiting for flood-monitoring sensor readings", confidence: 0, modelType: "insufficient data" };
+  }
   const {
     waterLevelM = 0,
     rainfallMmHr,
@@ -410,6 +413,7 @@ const CITIZEN_MESSAGE = {
 };
 
 function citizenMessage(hazard, level) {
+  if (level === "unknown") return "Sensor data is unavailable. Current conditions cannot be assessed.";
   return (CITIZEN_MESSAGE[hazard] && CITIZEN_MESSAGE[hazard][level]) || "Check the dashboard for the latest status.";
 }
 

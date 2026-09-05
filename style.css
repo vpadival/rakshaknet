@@ -322,3 +322,4 @@ button{ font-family: inherit; cursor:pointer; }
   .zone-list{ border-right:none; border-bottom:1px solid var(--border); max-height:220px; }
   .detail-panel{ border-left:none; border-top:1px solid var(--border); }
 }
+ .badge-unknown { background: #8993a422; color: #8993a4; }

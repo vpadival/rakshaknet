@@ -58,6 +58,12 @@ npm start
 
 Then open **http://localhost:4000** in your browser — the same Express server serves the dashboard *and* the API. The dashboard polls the backend every 5 seconds; the status dot next to the clock turns red if it loses the connection.
 
+The hardware zone (`z4`) is selected initially and shows **unknown** until flood sensor readings arrive. Node ONLINE/OFFLINE is separate from the server connection indicator; a node goes offline after 60 seconds without telemetry. Displayed readings remain the last reported values. The dashboard retries failed startup connections automatically.
+
+For the 25 cm tabletop sensor, start with `DEMO_MODE=true` (PowerShell: `$env:DEMO_MODE="true"; npm start`). Without this setting, water thresholds are 3 m and 6 m and the tabletop water sensor cannot reach them. Open the dashboard served by the **same backend URL configured in the firmware**; a local server cannot see readings posted to Render. The firmware serial monitor prints HTTP status and response details for troubleshooting. Optional telemetry timestamps must be Unix milliseconds, within the last day, and in order; omit them on devices without a synchronized clock.
+
+Run regression checks with `cd backend` then `npm test`. They cover telemetry ingestion, malformed input, preserved hazard reports, public-file restrictions, AQI decimal handling, and dashboard connection recovery. Tests disable external SMS delivery.
+
 For a Render deployment, set `DEMO_MODE=true` for the tabletop water-level thresholds. The server reads Render's `PORT` environment variable and binds to `0.0.0.0`; locally it defaults to port `4000`. The frontend uses same-origin relative API paths, so the same build works locally and when deployed with the backend.
 
 ## Dashboard
@@ -93,7 +99,7 @@ See the data audit table above for what backs each hazard. `classify.js` is heav
 `sensorLimits.js` documents every threshold's source. Most are data-derived (real percentiles from the uploaded datasets); **MQ2 gas thresholds are literature defaults, not data-derived** — no uploaded dataset includes gas sensor readings, so recalibrate against your actual sensor's datasheet and a controlled test before trusting those numbers.
 
 ### SMS gateway
-`smsGateway.js` currently logs and stores dispatches in memory instead of sending a real text. Replace the body of `sendSms()` with a real provider call (Twilio is stubbed as a comment) once credentials are available. Auto-dispatch on escalation to "severe" is controlled by `SEVERE_AUTO_SMS`; mass-event clustering (multiple zones severe at once) is controlled by `MASS_EVENT_ZONE_THRESHOLD`, both in `server.js`.
+`smsGateway.js` supports Twilio using `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_PHONE_NUMBER`, and comma-separated `ALERT_PHONE_NUMBERS`. Without credentials it simulates delivery; without recipients it records `not-sent`. The dashboard shows these statuses and provider failures. Logs are in memory. Auto-dispatch on escalation to "severe" is controlled by `SEVERE_AUTO_SMS`; mass-event clustering is controlled by `MASS_EVENT_ZONE_THRESHOLD`, both in `server.js`.
 
 ## Not yet wired up
 - **Person detection** — no image dataset was provided, so nothing is trained. The `peopleDetected` telemetry field and dashboard display already exist as the integration point; the recommended path is a pretrained model (e.g. YOLOv8n's "person" class) running on the edge camera device, posting `{ count, note }` to the existing telemetry endpoint.

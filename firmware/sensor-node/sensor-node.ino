@@ -46,9 +46,11 @@ float toPercent(int raw, int dryRaw, int wetRaw) {
   return constrain(100.0 * (dryRaw - raw) / (dryRaw - wetRaw), 0, 100);
 }
 
-void connectWiFi() {
+bool connectWiFi() {
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-  while (WiFi.status() != WL_CONNECTED) delay(500);
+  unsigned long started = millis();
+  while (WiFi.status() != WL_CONNECTED && millis() - started < 15000) delay(500);
+  return WiFi.status() == WL_CONNECTED;
 }
 
 void calibrateMQ2() {
@@ -61,6 +63,10 @@ void calibrateMQ2() {
 }
 
 void sendTelemetry() {
+  if (WiFi.status() != WL_CONNECTED && !connectWiFi()) {
+    Serial.println("Wi-Fi unavailable; retrying next cycle");
+    return;
+  }
   float temperature = dht.readTemperature();
   float humidity = dht.readHumidity();
   int soilRaw = analogRead(SOIL_PIN);
@@ -87,13 +93,15 @@ void sendTelemetry() {
   if (!isnan(waterLevelM)) json += ",\"waterLevelM\":" + String(waterLevelM, 3);
   json += "}}";
 
-  if (WiFi.status() != WL_CONNECTED) connectWiFi();
   WiFiClientSecure client;
   client.setInsecure();
   HTTPClient http;
+  http.setTimeout(15000);
   http.begin(client, TELEMETRY_URL);
   http.addHeader("Content-Type", "application/json");
-  Serial.println(http.POST(json));
+  int status = http.POST(json);
+  Serial.printf("Telemetry HTTP status: %d\n", status);
+  if (status > 0) Serial.println(http.getString());
   http.end();
 }
 
