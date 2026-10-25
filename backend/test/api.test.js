@@ -15,6 +15,46 @@ async function post(path, body) {
   const response = await fetch(base + path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
   return { status: response.status, body: await response.json() };
 }
+test('check-in distinguishes safe, risk, outside and unknown locations', async () => {
+  const unknown = (await post('/api/checkin', { lat: 12.935, lng: 77.614 })).body;
+  assert.equal(unknown.safety, 'unknown');
+  assert.equal(unknown.evacuationRequired, false);
+  const outside = (await post('/api/checkin', { lat: 13.5, lng: 77.6 })).body;
+  assert.equal(outside.safety, 'outside');
+  assert.equal(outside.evacuationRequired, false);
+  assert.equal(outside.zone, undefined);
+  const risk = (await post('/api/checkin', { lat: 28.667, lng: 77.245 })).body;
+  assert.equal(risk.safety, 'risk');
+  assert.equal(risk.evacuationRequired, true);
+  assert.equal(risk.zone.id, 'z1');
+  await post('/api/zones/z3/telemetry', { nodeId: 'test', sensors: { aqi: 20 } });
+  const safe = (await post('/api/checkin', { lat: 19.076, lng: 72.882 })).body;
+  assert.equal(safe.safety, 'safe');
+  assert.equal(safe.evacuationRequired, false);
+});
+
+test('camera returns uploaded bytes and exposes stale frames', async () => {
+  assert.equal((await fetch(base + '/api/zones/z1/camera/latest.jpg')).status, 404);
+  const jpeg = Buffer.from([0xff, 0xd8, 0xff, 0xd9]);
+  const upload = await fetch(base + '/api/zones/z1/camera/frame', { method: 'POST', headers: { 'Content-Type': 'image/jpeg', 'X-Camera-ID': 'real-camera' }, body: jpeg });
+  assert.equal(upload.status, 200);
+  const image = await fetch(base + '/api/zones/z1/camera/latest.jpg');
+  assert.deepEqual(Buffer.from(await image.arrayBuffer()), jpeg);
+  assert.match(image.headers.get('cache-control'), /no-store/);
+  const zone = await (await fetch(base + '/api/zones/z1')).json();
+  assert.equal(zone.cameraStatus.live, true);
+  assert.equal(zone.cameraStatus.cameraId, 'real-camera');
+  const originalNow = Date.now;
+  try {
+    Date.now = () => originalNow() + 61000;
+    const stale = await (await fetch(base + '/api/zones/z1')).json();
+    assert.equal(stale.cameraStatus.live, false);
+    const unknown = (await post('/api/checkin', { lat: 19.076, lng: 72.882 })).body;
+    assert.equal(unknown.safety, 'unknown');
+    assert.equal(unknown.evacuationRequired, false);
+  } finally { Date.now = originalNow; }
+});
+
 test('hardware lifecycle: empty, connected, invalid and out-of-order readings', async () => {
   const initial = await (await fetch(base + '/api/zones/z4')).json();
   assert.equal(initial.level, 'unknown');

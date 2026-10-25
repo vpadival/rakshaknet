@@ -68,8 +68,8 @@ For a Render deployment, set `DEMO_MODE=true` for the tabletop water-level thres
 
 ## Dashboard
 
-- **Authority view** — per-zone sensor readings, predicted cause with confidence and which model produced it (`modelType`), camera-based stranded-people detection, manual SMS dispatch.
-- **Citizen view** — simplified threat level, safe-zone guidance, one-tap navigation to the nearest safe area (real Google Maps directions), the same stranded-people alert (framed for community assistance), and a **"Use my location"** button that checks the phone's browser location against monitored zones (no GPS module needed on the hardware).
+- **Authority view** — per-zone sensor readings, predicted cause with confidence and which model produced it (`modelType`), actual ESP32-CAM images and manual SMS dispatch. The camera panel shows only uploaded images, refreshing every 5 seconds; frames older than 15 seconds are labeled offline rather than live. Missing frames show a waiting state and image failures retry at the next refresh.
+- **Citizen view** — **"Use my location"** checks the phone location independently of the zone selected on the map. Safe locations show "already in a safer area" with no alternative destination. Only a location matched to a moderate/severe zone shows its designated local shelter, evacuation guidance and Google Maps directions from the checked coordinates. Unknown/offline sensor assessments, denied location access and failed requests show no route. Outside coverage shows no monitored risk, without claiming verified safety. Location checks refresh against current readings every 5 seconds and expire after 5 minutes; click again after moving. Browser location requires HTTPS (or localhost). Matching uses the existing 25 km radius around zone centres, not precise hazard boundaries.
 - **SMS log** — reflects real dispatches from the backend, including a distinct entry when a mass event fires.
 - **"Simulate escalation"** button posts real telemetry to the backend rather than faking it client-side.
 
@@ -83,7 +83,7 @@ For a Render deployment, set `DEMO_MODE=true` for the tabletop water-level thres
 | POST | `/api/zones/:id/camera/frame` | ESP32-CAM uploads the latest raw JPEG body with `Content-Type: image/jpeg` and optional `X-Camera-ID`. |
 | GET | `/api/zones/:id/camera/latest.jpg` | Returns the latest in-memory JPEG frame for the dashboard. |
 | POST | `/api/zones/:id/earthquake` | Manually report (or later, relay from real accelerometer hardware) a seismic event. Body: `{ magnitude }`. Not ML-predicted. |
-| POST | `/api/checkin` | Phone-geolocation check-in. Body: `{ lat, lng }` — matches to the nearest zone within 25km, or returns a generic "no known hazard" response |
+| POST | `/api/checkin` | Phone-geolocation check-in. Body: `{ lat, lng }` — matches to the nearest zone within 25km; returns `safety` (`safe`, `risk`, `unknown`, `outside`) and `evacuationRequired` |
 | POST | `/api/zones/:id/sms` | Manually dispatch an SMS for a zone. Body: `{ message? }` |
 | GET | `/api/sms-log` | Recent SMS dispatch history, including mass-event entries |
 | GET | `/api/health` | Liveness check |

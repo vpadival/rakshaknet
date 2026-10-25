@@ -11,6 +11,7 @@ const PORT = process.env.PORT || 4000;
 const SEVERE_AUTO_SMS = true; // fire an SMS automatically the moment a zone crosses into "severe"
 const MASS_EVENT_ZONE_THRESHOLD = 3; // if this many zones are severe at once, escalate to authorities separately
 const CHECKIN_RADIUS_KM = 25; // how far a citizen's phone location can be from a zone and still match it
+const CAMERA_FRESH_MS = 15000;
 const FRONTEND_DIR = path.join(__dirname, ".."); // index.html, style.css, app.js, data.js live one level up
 
 const app = express();
@@ -105,7 +106,7 @@ function serializeZone(z) {
     citizenMessage,
     updatedAt,
     nodeStatus,
-    cameraStatus,
+    cameraStatus: { ...cameraStatus, live: Boolean(cameraStatus?.lastSeen && Date.now() - Date.parse(cameraStatus.lastSeen) < CAMERA_FRESH_MS) },
     evacuationGuidance: getEvacuationGuidance(hazard),
   };
 }
@@ -411,9 +412,7 @@ app.post("/api/zones/:id/earthquake", async (req, res) => {
 });
 
 // Citizen phone-geolocation check-in: no GPS module on the hardware, so this
-// matches a browser/phone location to the nearest zone within
-// CHECKIN_RADIUS_KM. Returns null zone (with a generic caution message) if
-// nothing is close enough to be meaningful.
+// Uses the existing circular monitoring radius, not an exact hazard boundary.
 app.post("/api/checkin", (req, res) => {
   const { lat, lng } = req.body || {};
   if (!Number.isFinite(lat) || !Number.isFinite(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180) {
@@ -433,12 +432,26 @@ app.post("/api/checkin", (req, res) => {
   if (!nearest || nearestDistanceKm > CHECKIN_RADIUS_KM) {
     return res.json({
       matched: false,
+      safety: "outside",
+      evacuationRequired: false,
       distanceKm: nearest ? Math.round(nearestDistanceKm * 10) / 10 : null,
-      message: "You're outside any monitored zone right now. No known hazards reported near you.",
+      message: "No monitored risk area near your location. No evacuation route is needed based on this network. Areas outside monitoring are not verified safe.",
     });
   }
 
-  res.json({ matched: true, distanceKm: Math.round(nearestDistanceKm * 10) / 10, zone: serializeZone(nearest) });
+  const zone = serializeZone(nearest);
+  const stale = zone.nodeStatus.lastSeen && !zone.nodeStatus.online;
+  const safety = stale || zone.level === "unknown" ? "unknown" : zone.level === "safe" ? "safe" : "risk";
+  res.json({
+    matched: true,
+    safety,
+    evacuationRequired: safety === "risk",
+    message: safety === "safe" ? "You're already in a safer area. No evacuation is needed."
+      : safety === "unknown" ? "Safety at your location is unknown. Waiting for current sensor readings."
+      : `Your location is in the monitored risk area for ${zone.name}.`,
+    distanceKm: Math.round(nearestDistanceKm * 10) / 10,
+    zone,
+  });
 });
 
 // Manual SMS dispatch (authority "Send SMS alert" button).

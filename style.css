@@ -232,7 +232,7 @@ button{ font-family: inherit; cursor:pointer; }
   display:block;
   width:100%;
   max-height:320px;
-  object-fit:cover;
+  object-fit:contain;
   border-radius:10px;
   background:#111;
 }
@@ -323,3 +323,6 @@ button{ font-family: inherit; cursor:pointer; }
   .detail-panel{ border-left:none; border-top:1px solid var(--border); }
 }
  .badge-unknown { background: #8993a422; color: #8993a4; }
+
+#useLocationBtn{ margin-bottom:16px; }
+.nav-btn:disabled{ opacity:0.6; cursor:wait; }

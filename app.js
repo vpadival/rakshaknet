@@ -5,6 +5,76 @@
   const markers = {};
   const POLL_MS = 5000;
   let zonesLoading = false;
+  let citizenLocation = null;
+  let locationResult = null;
+  let locationPending = false;
+  let locationError = "";
+
+  // Older running servers return only { matched, zone, distanceKm }.
+  // Normalize both API versions before rendering location guidance.
+  function normalizeCheckin(result) {
+    const zone = result?.zone;
+    const knownLevel = ["safe", "moderate", "severe"].includes(zone?.level);
+    const stale = zone?.nodeStatus?.lastSeen && !zone.nodeStatus.online;
+    let safety = "unknown";
+    if (result?.matched === false || result?.safety === "outside") safety = "outside";
+    else if ((result?.matched === true || ["safe", "risk"].includes(result?.safety)) && knownLevel && !stale) {
+      safety = zone.level === "safe" ? "safe" : "risk";
+    }
+    // An explicit unknown assessment must never be upgraded by old zone data.
+    if (result?.safety === "unknown") safety = "unknown";
+    const messages = {
+      safe: "You're already in a safer area. No evacuation is needed.",
+      outside: "No monitored risk area near your location. Areas outside monitoring are not verified safe.",
+      unknown: "Safety at your location is unknown. Waiting for current sensor readings.",
+      risk: `Your location is in the monitored risk area for ${zone?.name || "a nearby zone"}.`,
+    };
+    const destination = zone?.safeZone;
+    const hasDestination = Number.isFinite(destination?.lat) && Math.abs(destination.lat) <= 90
+      && Number.isFinite(destination?.lng) && Math.abs(destination.lng) <= 180;
+    return { zone, safety, message: messages[safety], evacuationRequired: safety === "risk" && hasDestination };
+  }
+
+  async function refreshLocationSafety() {
+    if (!citizenLocation) return;
+    if (Date.now() - citizenLocation.checkedAt > 300000) {
+      citizenLocation = null;
+      locationResult = null;
+      locationError = "Location check expired. Use my location again for current guidance.";
+      return;
+    }
+    try {
+      const location = citizenLocation;
+      const result = await apiPost("/api/checkin", location);
+      if (location !== citizenLocation) return;
+      locationResult = normalizeCheckin(result);
+      locationError = "";
+    } catch (err) {
+      locationResult = null;
+      locationError = "Unable to check local risk. Try again when the server is available.";
+    }
+  }
+
+  async function useMyLocation() {
+    if (locationPending) return;
+    locationPending = true;
+    citizenLocation = null;
+    locationResult = null;
+    locationError = "";
+    renderDetail();
+    try {
+      if (!navigator.geolocation) throw new Error("Location is unavailable in this browser.");
+      const position = await new Promise((resolve, reject) => navigator.geolocation.getCurrentPosition(resolve, reject, { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }));
+      citizenLocation = { lat: position.coords.latitude, lng: position.coords.longitude, checkedAt: Date.now() };
+      await refreshLocationSafety();
+      if (locationResult) map.flyTo([citizenLocation.lat, citizenLocation.lng], 12, { duration: 0.6 });
+    } catch (err) {
+      locationError = err.code === 1 ? "Location permission denied. Allow location access and try again." : "Unable to get your location. Enable location access and try again (HTTPS or localhost required).";
+    } finally {
+      locationPending = false;
+      renderDetail();
+    }
+  }
   const escapeHtml = (value) => String(value ?? "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[char]));
   // Escape server-controlled strings before interpolating them into HTML.
   function escapeData(value) {
@@ -70,11 +140,15 @@
         selectedZoneId = (ZONES.find((zone) => zone.id === "z4") || ZONES[0])?.id;
       }
 
+      if (currentView === "citizen") await refreshLocationSafety();
       renderZoneList();
       renderDetail();
     } catch (err) {
       console.error(err);
       setConnectionStatus(false);
+      locationResult = null;
+      locationError = "Unable to check local risk. Try again when the server is available.";
+      if (currentView === "citizen") renderDetail();
       if (isFirstLoad) {
         document.getElementById("zoneItems").innerHTML =
           `<p style="color:var(--text-muted);font-size:12px;">Can't reach the backend at ${API_BASE}. Start it with <code>npm start</code> in /backend, then reload.</p>`;
@@ -113,12 +187,16 @@
   function renderDetail() {
     const zone = ZONES.find((z) => z.id === selectedZoneId);
     const panel = document.getElementById("detailPanel");
+    if (currentView === "citizen") {
+      panel.innerHTML = citizenLocationDetail();
+      return;
+    }
     if (!zone) {
       panel.innerHTML = `<div class="detail-empty">Select a zone to view details</div>`;
       return;
     }
     const displayZone = escapeData(zone);
-    panel.innerHTML = currentView === "authority" ? authorityDetail(displayZone) : citizenDetail(displayZone);
+    panel.innerHTML = authorityDetail(displayZone);
     if (zone.nodeStatus?.lastSeen && !zone.nodeStatus.online) {
       panel.insertAdjacentHTML("afterbegin", '<div class="people-box">Sensor node offline. Readings and assessment below are from its last report.</div>');
     }
@@ -134,10 +212,6 @@
       `)
       .join("");
 
-    const peopleBox = zone.peopleDetected.count > 0
-      ? `<div class="people-box"><span class="people-count">${zone.peopleDetected.count} ${zone.peopleDetected.count === 1 ? "person" : "people"} detected</span><br>${zone.peopleDetected.note}</div>`
-      : `<div class="people-box none">${zone.peopleDetected.note}</div>`;
-
     const nodeOnline = Boolean(zone.nodeStatus?.online);
     const nodeBox = `
       <div class="people-box ${nodeOnline ? "" : "none"}">
@@ -150,9 +224,9 @@
     const cameraBox = zone.cameraStatus?.available
       ? `
         <div class="camera-frame-wrap">
-          <img class="camera-frame" src="${API_BASE}/api/zones/${zone.id}/camera/latest.jpg?t=${Date.now()}" alt="Live ESP32-CAM frame" onerror="this.style.display='none'">
+          <img class="camera-frame" src="${API_BASE}/api/zones/${zone.id}/camera/latest.jpg?t=${Date.now()}" alt="Latest image from the zone camera" onerror="this.style.display='none';this.parentNode.querySelector('.camera-meta').textContent='Camera image unavailable. Retrying on next refresh.'">
           <div class="camera-meta">
-            ${zone.cameraStatus.cameraId || "ESP32-CAM"} · last frame ${zone.cameraStatus.lastSeen ? new Date(zone.cameraStatus.lastSeen).toLocaleTimeString() : "unknown"}
+            ${zone.cameraStatus.live ? "LIVE · " : "OFFLINE · Last received image · "}${zone.cameraStatus.cameraId || "ESP32-CAM"} · last frame ${zone.cameraStatus.lastSeen ? new Date(zone.cameraStatus.lastSeen).toLocaleTimeString() : "unknown"}
           </div>
         </div>
       `
@@ -187,25 +261,35 @@
       </div>
 
       <div class="detail-section">
-        <h3>Camera intelligence</h3>
-        ${peopleBox}
-      </div>
-
-      <div class="detail-section">
         <h3>Dispatch</h3>
         <button class="nav-btn" id="dispatchSmsBtn" style="border:none;">Send SMS alert to this zone</button>
       </div>
     `;
   }
 
+  function citizenLocationDetail() {
+    if (citizenLocation && Date.now() - citizenLocation.checkedAt > 300000) {
+      citizenLocation = null;
+      locationResult = null;
+      locationError = "Location check expired. Use my location again for current guidance.";
+    }
+    const control = `<button class="nav-btn" id="useLocationBtn" ${locationPending ? "disabled" : ""}>${locationPending ? "Checking location…" : "Use my location"}</button>`;
+    if (!locationResult) return `${control}<div class="people-box none" role="status">${escapeHtml(locationError || (locationPending ? "Checking risk at your location…" : "Check your location to see whether you need to move to a safer area."))}</div>`;
+    const result = escapeData(locationResult);
+    const titles = { safe: "You're already in a safer area", outside: "No monitored risk near you", unknown: "Safety unknown", risk: "Risk near your location" };
+    const status = `${control}<div class="citizen-status" role="status"><h2>${titles[result.safety]}</h2><p>${result.message}</p></div>`;
+    if (!result.evacuationRequired || result.safety !== "risk") return status;
+    return status + citizenDetail(result.zone);
+  }
+
   function citizenDetail(zone) {
     const levelCopy = { unknown: "Awaiting sensor data", safe: "All clear", moderate: "Elevated risk", severe: "Severe threat" };
     const guidance = zone.evacuationGuidance;
-    const peopleBox = zone.peopleDetected.count > 0
+    const peopleBox = zone.peopleDetected?.count > 0
       ? `<div class="people-box"><span class="people-count">${zone.peopleDetected.count} ${zone.peopleDetected.count === 1 ? "person" : "people"} may need help nearby</span><br>If it's safe to do so, assist or alert responders.</div>`
       : "";
 
-    const mapsUrl = `https://www.google.com/maps/dir/?api=1&destination=${zone.safeZone.lat},${zone.safeZone.lng}`;
+    const mapsUrl = `https://www.google.com/maps/dir/?api=1&origin=${citizenLocation.lat},${citizenLocation.lng}&destination=${zone.safeZone.lat},${zone.safeZone.lng}`;
     const list = (items, className = "") => `<ul class="safety-list ${className}">${items.map((item) => `<li>${item}</li>`).join("")}</ul>`;
     const emergencyBag = guidance
       ? `<div class="emergency-bag-card"><div class="emergency-bag-title">Emergency go-bag</div><div class="emergency-bag-items">${guidance.carry.slice(0, 7).map((item) => `<span>${item}</span>`).join("")}</div></div>`
@@ -217,15 +301,15 @@
     return `
       <div class="citizen-status" style="background:${LEVEL_COLOR[zone.level]}22; border:1px solid ${LEVEL_COLOR[zone.level]};">
         <h2 style="color:${LEVEL_COLOR[zone.level]}">${levelCopy[zone.level]}</h2>
-        <p>${zone.citizenMessage}</p>
+        <p>${zone.citizenMessage || "Follow local authority instructions and monitor official alerts."}</p>
       </div>
 
       ${peopleBox}
 
       <div class="detail-section" style="margin-top:20px;">
-        <h3>Nearest safe area</h3>
+        <h3>Designated safe area near the affected zone</h3>
         <div class="safe-zone-name">${zone.safeZone.name}${zone.safeZone.distanceKm ? ` · ${zone.safeZone.distanceKm} km away` : ""}</div>
-        ${zone.level !== "safe" ? `<a class="nav-btn" href="${mapsUrl}" target="_blank" rel="noopener">Navigate to safe area</a>` : ""}
+        ${["moderate", "severe"].includes(zone.level) ? `<a class="nav-btn" href="${mapsUrl}" target="_blank" rel="noopener">Navigate to safe area</a>` : ""}
         ${emergencyBag}
       </div>
       ${evacuationGuide}
@@ -328,6 +412,10 @@
 
   // Delegate the authority "send SMS" button (re-rendered each time)
   document.getElementById("detailPanel").addEventListener("click", async (e) => {
+    if (e.target && e.target.id === "useLocationBtn") {
+      await useMyLocation();
+      return;
+    }
     if (e.target && e.target.id === "dispatchSmsBtn") {
       const zone = ZONES.find((z) => z.id === selectedZoneId);
       if (!zone) return;
