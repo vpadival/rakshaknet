@@ -325,4 +325,14 @@ button{ font-family: inherit; cursor:pointer; }
  .badge-unknown { background: #8993a422; color: #8993a4; }
 
 #useLocationBtn{ margin-bottom:16px; }
+.demo-controls{ margin:12px 0 18px; padding:12px; border:1px solid var(--border); border-radius:8px; }
+.demo-controls label{ display:block; font-size:12px; margin-bottom:8px; }
+.demo-controls select{ width:100%; padding:8px; background:var(--panel); color:var(--text); border:1px solid var(--border); border-radius:6px; }
+.demo-controls p,.demo-note{ font-size:12px; color:var(--text-muted); line-height:1.5; }
+.demo-banner{ padding:6px 10px; margin-bottom:12px; border:1px solid var(--border); border-radius:6px; font-size:12px; color:var(--text-muted); line-height:1.5; }
+.demo-led{ display:inline-block; width:16px; height:16px; border-radius:50%; background:var(--text-muted); margin-right:8px; }
+.demo-led.active{ background:var(--severe); box-shadow:0 0 14px var(--severe); }
+.demo-actions{ display:flex; flex-wrap:wrap; gap:8px; margin:16px 0; }
+.demo-actions button{ flex:1; min-width:120px; }
+.demo-map-note{ position:absolute; top:12px; left:52px; right:12px; z-index:500; max-width:360px; background:var(--panel); color:var(--text); padding:10px 12px; border-radius:8px; border:1px solid var(--border); font-size:12px; line-height:1.5; pointer-events:none; }
 .nav-btn:disabled{ opacity:0.6; cursor:wait; }

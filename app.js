@@ -9,6 +9,71 @@
   let locationResult = null;
   let locationPending = false;
   let locationError = "";
+  let demoActive = false;
+  let demoTriggered = false;
+  let presentationClean = true;
+  let demoMapLayer = null;
+  let demoMapKey = null;
+  let demoAlertKey = null;
+  const demoMessages = [];
+  const requestedScenario = typeof location !== "undefined" ? new URLSearchParams(location.search).get("presentation") : null;
+  if (Object.hasOwn(DEMO_SCENARIOS, requestedScenario)) {
+    document.getElementById("demoScenario").value = requestedScenario;
+    demoActive = true;
+    demoTriggered = true;
+  }
+
+  function renderDemo() {
+    const scenarioId = document.getElementById("demoScenario").value;
+    const scenario = DEMO_SCENARIOS[scenarioId] || DEMO_SCENARIOS.homeFire;
+    renderDemoMap(scenarioId, scenario);
+    if (!demoTriggered) demoAlertKey = null;
+    if (demoTriggered && demoAlertKey !== scenarioId) {
+      demoAlertKey = scenarioId;
+      demoMessages.unshift({ time: new Date().toLocaleTimeString(), message: `SIMULATION — BNMIT authority: two people are in the ${scenario.name.toLowerCase()} demo risk area and need evacuation assistance. Please coordinate rescue. Preview only; not sent.` });
+      demoMessages.splice(20);
+    }
+    document.getElementById("zoneItems").innerHTML = `<div class="zone-card selected"><div class="zone-card-top"><span class="zone-card-name">BNMIT · campus demo</span><span class="badge badge-${demoTriggered ? "severe" : "unknown"}">${demoTriggered ? "demo alert" : "ready"}</span></div><div class="zone-card-meta">${scenario.name} · ${demoTriggered ? "2 simulated occupants" : "Awaiting demo event"}</div></div>`;
+    renderDemoMessages();
+    const readings = demoTriggered ? Object.entries(scenario.readings).map(([key, value]) =>
+      `<div class="reading"><div class="reading-label">${readingLabel(key)} (simulated)</div><div class="reading-value">${value}${readingUnit(key)}</div></div>`).join("") : "Waiting for the presenter to trigger the scripted event.";
+    document.getElementById("detailPanel").innerHTML = `
+      <div class="demo-banner" role="status"><strong>Demo mode</strong> · Simulated readings and occupancy</div>
+      <div class="detail-head"><h2>BNMIT · ${scenario.name}</h2><span class="badge badge-${demoTriggered ? "severe" : "unknown"}">${demoTriggered ? "DEMO ALERT" : "READY"}</span></div>
+      ${presentationClean ? "" : '<div class="demo-actions"><button id="demoTriggerBtn" class="nav-btn">Trigger demo event</button><button id="demoResetBtn" class="ghost-btn">Reset rehearsal</button><button id="demoExitBtn" class="ghost-btn">Return to monitoring</button></div>'}
+      <div class="people-box"><span class="demo-led ${demoTriggered ? "active" : ""}" aria-hidden="true"></span>On-screen alert LED: ${demoTriggered ? "ON" : "OFF"} (simulated)</div>
+      <div class="people-box"><strong>BNMIT prototype: CONNECTED (SIMULATED)</strong><br>Virtual sensor and camera nodes · no physical hardware connection</div>
+      <div class="detail-section"><h3>Simulated sensor readings</h3><div class="reading-grid">${readings}</div></div>
+      <div class="detail-section"><h3>Scripted camera occupancy</h3><div class="people-box"><strong>${demoTriggered ? "2 people · fixed demo count" : "Occupancy scenario pending"}</strong><br>No image analysis is running. Standing in front of the camera does not change this count.</div><p class="demo-note">The actual ESP32-CAM image remains available in the monitoring view when hardware is connected.</p></div>
+      ${demoTriggered ? `<div class="citizen-status" role="alert"><h2>SIMULATED ALERT</h2><p>${scenario.alert}</p></div><div class="detail-section"><h3>Illustrative destination</h3><p>${scenario.destination}</p><p>${scenario.guidance}</p><p class="demo-note">Presentation guidance only. This scenario does not verify a safe destination or evacuation route.</p></div>` : ""}
+    `;
+  }
+
+  function renderDemoMessages() {
+    document.getElementById("smsLogTitle").textContent = "BNMIT authority message previews";
+    document.getElementById("smsLogNote").textContent = "Simulation · local previews only · no SMS sent";
+    document.getElementById("smsEntries").innerHTML = demoMessages.length ? demoMessages.map(entry => `<div class="sms-entry"><span class="sms-time">${entry.time}</span><span class="sms-zone">BNMIT · NOT SENT</span><span>${entry.message}</span></div>`).join("") : '<div class="sms-entry">Waiting for a simulated BNMIT event.</div>';
+  }
+
+  function renderDemoMap(scenarioId, scenario) {
+    const key = `${scenarioId}:${demoTriggered}`;
+    if (demoMapKey === key) return;
+    const entering = demoMapKey === null;
+    demoMapKey = key;
+    Object.values(markers).forEach(marker => map.removeLayer(marker));
+    if (demoMapLayer) map.removeLayer(demoMapLayer);
+    demoMapLayer = L.layerGroup().addTo(map);
+    L.marker(DEMO_CAMPUS.center, { icon: markerIcon(demoTriggered ? "severe" : "unknown") })
+      .bindTooltip(`BNMIT · ${scenario.name} · SIMULATION`).addTo(demoMapLayer);
+    if (demoTriggered) {
+      L.polyline(DEMO_CAMPUS.exitPath, { color: "#5b8def", weight: 5, dashArray: "8 8" })
+        .bindTooltip("Illustrative exit line only — not a verified road or safe route").addTo(demoMapLayer);
+      L.marker(DEMO_CAMPUS.exitPath.at(-1), { icon: markerIcon("unknown") })
+        .bindTooltip("Outside-road illustration · destination safety unverified").addTo(demoMapLayer);
+    }
+    document.getElementById("demoMapNote").style.display = "block";
+    if (entering) map.flyTo(DEMO_CAMPUS.center, 18, { duration: 0.6 });
+  }
 
   // Older running servers return only { matched, zone, distanceKm }.
   // Normalize both API versions before rendering location guidance.
@@ -122,10 +187,12 @@
   }
 
   async function loadZones({ isFirstLoad = false } = {}) {
+    if (demoActive) { renderDetail(); return; }
     if (zonesLoading) return;
     zonesLoading = true;
     try {
       const data = await apiGet("/api/zones");
+      if (demoActive) { renderDetail(); return; }
       ZONES = data;
       setConnectionStatus(true);
 
@@ -149,7 +216,7 @@
       locationResult = null;
       locationError = "Unable to check local risk. Try again when the server is available.";
       if (currentView === "citizen") renderDetail();
-      if (isFirstLoad) {
+      if (isFirstLoad && !demoActive) {
         document.getElementById("zoneItems").innerHTML =
           `<p style="color:var(--text-muted);font-size:12px;">Can't reach the backend at ${API_BASE}. Start it with <code>npm start</code> in /backend, then reload.</p>`;
       }
@@ -158,6 +225,7 @@
 
   // ---------- Zone list ----------
   function renderZoneList() {
+    if (demoActive) return;
     const container = document.getElementById("zoneItems");
     container.innerHTML = "";
     ZONES.forEach((zone) => {
@@ -185,6 +253,26 @@
 
   // ---------- Detail panel ----------
   function renderDetail() {
+    const hideControls = demoActive && presentationClean;
+    document.getElementById("simulateBtn").style.display = hideControls ? "none" : "";
+    document.getElementById("demoControls").style.display = hideControls ? "none" : "";
+    if (demoActive) { renderDemo(); return; }
+    if (demoMapKey !== null) {
+      map.removeLayer(demoMapLayer);
+      demoMapLayer = null;
+      demoMapKey = null;
+      demoAlertKey = null;
+      document.getElementById("demoMapNote").style.display = "none";
+      Object.values(markers).forEach(marker => marker.addTo(map));
+      const selected = ZONES.find(zone => zone.id === selectedZoneId);
+      map.flyTo(selected ? [selected.lat, selected.lng] : [21.5, 82.5], selected ? 8 : 5, { duration: 0.6 });
+      renderZoneList();
+      document.getElementById("smsLogTitle").textContent = "SMS alert log";
+      document.getElementById("smsLogNote").textContent = "Templated, zone-targeted dispatch on severity threshold";
+      document.getElementById("smsEntries").innerHTML = "";
+      refreshSmsLog();
+      loadZones();
+    }
     const zone = ZONES.find((z) => z.id === selectedZoneId);
     const panel = document.getElementById("detailPanel");
     if (currentView === "citizen") {
@@ -342,8 +430,10 @@
 
   // ---------- SMS log (rendered from backend, refreshed alongside zones) ----------
   async function refreshSmsLog() {
+    if (demoActive) { renderDemoMessages(); return; }
     try {
       const log = await apiGet("/api/sms-log");
+      if (demoActive) { renderDemoMessages(); return; }
       const container = document.getElementById("smsEntries");
       container.innerHTML = log
         .slice(0, 20)
@@ -388,30 +478,44 @@
     });
   });
 
-  // ---------- Escalation simulation (demo aid — posts real telemetry to the backend) ----------
-  document.getElementById("simulateBtn").addEventListener("click", async () => {
-    const zone = ZONES.find((z) => z.id !== "z4" && !z.nodeStatus?.lastSeen && z.level !== "severe");
-    if (!zone) return;
-
-    const bump = {};
-    if (zone.sensors.waterLevelM !== undefined) bump.waterLevelM = zone.sensors.waterLevelM + 2.5;
-    if (zone.sensors.rainfallMmHr !== undefined) bump.rainfallMmHr = zone.sensors.rainfallMmHr + 20;
-    if (zone.sensors.mq2Ppm !== undefined) bump.mq2Ppm = zone.sensors.mq2Ppm + 150;
-    if (zone.sensors.aqi !== undefined) bump.aqi = zone.sensors.aqi + 100;
-
-    try {
-      const { smsSent } = await apiPost(`/api/zones/${zone.id}/telemetry`, { nodeId: "SIMULATION", sensors: bump });
-      await loadZones();
-      await refreshSmsLog();
-      showToast(`${zone.name} updated · SMS: ${smsOutcome(smsSent)}`);
-      if (zone.id === selectedZoneId) renderDetail();
-    } catch (err) {
-      showToast("Backend unreachable — start the server on :4000");
-    }
+  // Presentation state stays in this browser; never post it as hardware telemetry.
+  document.addEventListener("keydown", (event) => {
+    if (event.repeat || event.ctrlKey || event.altKey || event.metaKey
+      || event.target?.isContentEditable || ["INPUT", "TEXTAREA", "SELECT", "BUTTON"].includes(event.target?.tagName)) return;
+    const scenarios = Object.keys(DEMO_SCENARIOS);
+    if (/^[1-6]$/.test(event.key)) {
+      document.getElementById("demoScenario").value = scenarios[Number(event.key) - 1];
+      demoActive = true;
+      demoTriggered = true;
+    } else if (demoActive && event.code === "Space") demoTriggered = true;
+    else if (demoActive && event.key.toLowerCase() === "r") demoTriggered = false;
+    else if (demoActive && event.key.toLowerCase() === "p") presentationClean = !presentationClean;
+    else if (demoActive && event.key === "Escape") demoActive = false;
+    else return;
+    event.preventDefault();
+    renderDetail();
+  });
+  document.getElementById("simulateBtn").addEventListener("click", () => {
+    demoActive = true;
+    demoTriggered = false;
+    presentationClean = true;
+    document.getElementById("simulateBtn").blur();
+    renderDetail();
+  });
+  document.getElementById("demoScenario").addEventListener("change", () => {
+    demoActive = true;
+    demoTriggered = false;
+    renderDetail();
   });
 
   // Delegate the authority "send SMS" button (re-rendered each time)
   document.getElementById("detailPanel").addEventListener("click", async (e) => {
+    if (["demoTriggerBtn", "demoResetBtn", "demoExitBtn"].includes(e.target?.id)) {
+      if (e.target.id === "demoExitBtn") demoActive = false;
+      demoTriggered = e.target.id === "demoTriggerBtn";
+      renderDetail();
+      return;
+    }
     if (e.target && e.target.id === "useLocationBtn") {
       await useMyLocation();
       return;
@@ -437,6 +541,7 @@
   setInterval(tickClock, 1000);
 
   // ---------- Init ----------
+  renderDetail();
   loadZones({ isFirstLoad: true });
   refreshSmsLog();
   setInterval(() => loadZones(), POLL_MS);
